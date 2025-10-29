@@ -1,290 +1,430 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>3D Skeneris ar vizualizāciju</title>
-<style>
-    body {
-        font-family: Arial, sans-serif;
-        text-align: center;
-        background: #fafafa;
-    }
-
-    canvas { border: 1px solid black; margin: 5px; }
-
-    #threeContainer {
-        width: 100%;
-        height: 400px;
-        margin-top: 10px;
-    }
-
-    #log {
-        margin-top: 10px;
-        font-family: monospace;
-        background-color: #f0f0f0;
-        padding: 10px;
-        border: 1px solid #ccc;
-        text-align: left;
-        overflow-y: auto;
-        max-height: 100px;
-    }
-
-    button, input[type=range] {
-        margin: 10px;
-        padding: 15px 25px;
-        font-size: 1.2em;
-        border: none;
-        border-radius: 10px;
-        background: #007bff;
-        color: white;
-        cursor: pointer;
-        transition: 0.2s ease;
-    }
-
-    button:hover {
-        background: #0056b3;
-    }
-
-    @media (max-width: 768px) {
-        button, input[type=range] {
-            width: 90%;
-            font-size: 1.4em;
-            padding: 20px;
-        }
-        #threeContainer {
-            height: 300px;
-        }
-    }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Skeneris ar vizualizāciju</title>
+    <style>
+        canvas { border: 1px solid black; }
+        #threeContainer { width: 100%; height: 400px; }
+        #log { margin-top: 10px; font-family: Arial, sans-serif; background-color: #f0f0f0; padding: 10px; border: 1px solid #ccc; }
+        .capture-container { margin: 10px 0; }
+        .captured-images { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+        .captured-image { width: 64px; height: 64px; border: 1px solid #ccc; }
+    </style>
 </head>
 <body>
+    <text style="font-size:2em;">3D skeneris ar rotāciju</text>
+    
+    <div class="capture-container">
+        <video id="video1" autoplay width="128" height="128"></video>
+        <canvas id="canvasZY" width="128" height="128"></canvas>
+        <canvas id="canvasOnnx" width="128" height="128"></canvas>
+        <canvas id="canvas1" width="0" height="0"></canvas>
+        <canvas id="canvas2" width="0" height="0"></canvas>
+    </div>
+    
+    <div class="capture-container">
+        <button id="captureButton">Uzņemt attēlu (45°)</button>
+        <button id="resetButton">Sākt no jauna</button>
+        <div>Uzņemtie attēli: <span id="captureCount">0/5</span></div>
+        <div class="captured-images" id="capturedImages"></div>
+    </div>
+    
+    <br>
+    <label for="thresholdSlider">Punktu lielums: </label>
+    <input type="range" id="thresholdSlider" min="0.5" max="10" value="5">
+    <br>
+    <button id="downloadButton">Lejupielādēt & Vizualizēt Punktu Mākoni</button>
+    
+    <!-- Log Section -->
+    <div id="log">Info:</div>
+    <!-- Container for Three.js Visualization -->
+    <div id="threeContainer"></div>
 
-<h2>3D Skeneris</h2>
-<video id="video1" autoplay width="128" height="128"></video>
-<canvas id="canvasZY" width="128" height="128"></canvas>
-<canvas id="canvasOnnx" width="128" height="128"></canvas>
-<canvas id="canvas1" width="0" height="0"></canvas>
-<canvas id="canvas2" width="0" height="0"></canvas>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.130.0/build/three.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js" defer></script>
+    
+    <script>
+        // Get references to DOM elements
+        const video1 = document.getElementById('video1');
+        const canvas1 = document.getElementById('canvas1');
+        const ctx1 = canvas1.getContext('2d');
+        const downloadButton = document.getElementById('downloadButton');
+        const thresholdSlider = document.getElementById('thresholdSlider');
+        const threeContainer = document.getElementById('threeContainer');
+        const log = document.getElementById('log');
+        const finalCanvas = document.getElementById("canvasOnnx");
+        const finalCtx = finalCanvas.getContext("2d");
+        const captureButton = document.getElementById('captureButton');
+        const resetButton = document.getElementById('resetButton');
+        const captureCount = document.getElementById('captureCount');
+        const capturedImages = document.getElementById('capturedImages');
+        
+        const canvas2 = document.getElementById('canvasZY');
+        const ctx2 = canvas2.getContext('2d');
+        const canvasZY = document.getElementById('canvasZY');
+        const ctxZY = canvasZY.getContext('2d');
+        
+        let session;
+        let capturedFrames = [];
+        let currentRotation = 0;
+        let points3D = [];
+        let scene, camera, renderer, pointCloud, material;
 
-<br>
-<label for="thresholdSlider">Punktu lielums:</label><br>
-<input type="range" id="thresholdSlider" min="0.5" max="10" value="5" step="0.1">
-<br>
+        window.onload = async function() {
+            try {
+                session = await ort.InferenceSession.create('./u2netp_128.onnx', {
+                    executionProviders: ['wasm']
+                });
+                console.log("Model loaded successfully");
+                logMessage("ONNX modelis ielādēts veiksmīgi");
+            } catch (error) {
+                console.error("Error loading model:", error);
+                logMessage("Kļūda ielādējot modeli: " + error.message);
+            }
+        };
 
-<button id="xyButton">XY</button>
-<button id="zyButton">ZY</button>
-<button id="downloadButton">Lejupielādēt un Vizualizēt Punktu Mākoni</button>
-<button id="resetButton" style="display:none; background:#dc3545;">Atiestatīt</button>
-<button id="saveButton" style="display:none; background:#28a745;">Saglabāt PLY</button>
+        // Function to invert colors
+        async function bgRemoval() {
+            if (!session) {
+                console.error("ONNX model is not loaded yet.");
+                return;
+            }
 
-<div id="log">Info:</div>
-<div id="threeContainer"></div>
+            const canvas = document.getElementById("canvasZY");
+            const ctx = canvas.getContext("2d");
+            const imageData = ctx.getImageData(0, 0, 128, 128);
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.130.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.130.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js" defer></script>
+            // Create a temporary offscreen canvas for resizing
+            const offscreenCanvas = document.createElement('canvas');
+            const offscreenCtx = offscreenCanvas.getContext('2d');
+            offscreenCanvas.width = 128;
+            offscreenCanvas.height = 128;
+            offscreenCtx.putImageData(imageData, 0, 0);
+            
+            // Create a resized canvas for 128x128
+            const resizedCanvas = document.createElement('canvas');
+            const resizedCtx = resizedCanvas.getContext('2d');
+            resizedCanvas.width = 128;
+            resizedCanvas.height = 128;
+            resizedCtx.drawImage(offscreenCanvas, 0, 0, 128, 128, 0, 0, 128, 128);
 
-<script>
-let session, scene, camera, renderer, pointCloud, material, controls;
-let pointsXY = [], pointsZY = [], commonPoints = [];
-let savedXYData = null, savedZYData = null;
-let isInverted = false;
+            // Get 128x128 image data
+            const resizedImageData = resizedCtx.getImageData(0, 0, 128, 128).data;
 
-const video1 = document.getElementById('video1');
-const canvas1 = document.getElementById('canvas1');
-const ctx1 = canvas1.getContext('2d');
-const ctx2 = document.getElementById('canvasZY').getContext('2d');
-const finalCanvas = document.getElementById("canvasOnnx");
-const finalCtx = finalCanvas.getContext("2d");
-const xyButton = document.getElementById('xyButton');
-const zyButton = document.getElementById('zyButton');
-const downloadButton = document.getElementById('downloadButton');
-const resetButton = document.getElementById('resetButton');
-const saveButton = document.getElementById('saveButton');
-const thresholdSlider = document.getElementById('thresholdSlider');
-const log = document.getElementById('log');
-const threeContainer = document.getElementById('threeContainer');
+            // Create a Float32Array for the 128x128 image data
+            const floatArr = new Float32Array(128 * 128 * 3);
+            for (let i = 0, j = 0; i < resizedImageData.length; i += 4, j++) {
+                floatArr[j] = (resizedImageData[i] / 255 - 0.485) / 0.229;
+                floatArr[j + 16384] = (resizedImageData[i + 1] / 255 - 0.456) / 0.224;
+                floatArr[j + 32768] = (resizedImageData[i + 2] / 255 - 0.406) / 0.225;
+            }
 
-function logMessage(msg){ log.textContent = msg; }
+            // Create ONNX tensor with the scaled data
+            const inputTensor = new ort.Tensor('float32', floatArr, [1, 3, 128, 128]);
 
-// Mobile check
-function isMobile() {
-    return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
+            // Prepare feeds for the model
+            const feeds = { "input.1": inputTensor };
 
-// Load ONNX model
-window.onload = async function() {
-    session = await ort.InferenceSession.create('./u2netp_128.onnx', {
-        executionProviders: ['wasm']
-    });
-    logMessage("Modelis ielādēts!");
-    startVideoStream();
-};
+            // Run ONNX inference
+            const results = await session.run(feeds);
+            const pred = Object.values(results)[0];
 
-async function startVideoStream() {
-    const constraints = {
-        video: isMobile() ? { facingMode: { exact: "environment" } } : true
-    };
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video1.srcObject = stream;
-        processFrame();
-    } catch (err) {
-        console.error('Camera error:', err);
-    }
-}
+            // Convert prediction to binary (black and white) with white background
+            const intermediateCanvas = document.createElement('canvas');
+            const intermediateCtx = intermediateCanvas.getContext('2d');
+            intermediateCanvas.width = 128;
+            intermediateCanvas.height = 128;
+            const myImageData = intermediateCtx.createImageData(128, 128);
+            const minVal = Math.min(...pred.data);
+            const maxVal = Math.max(...pred.data);
+            const threshold = (maxVal - minVal) * 0.5 + minVal;
 
-function processFrame() {
-    requestAnimationFrame(processFrame);
-    ctx1.drawImage(video1, 0, 0, 128, 128);
-    ctx2.drawImage(video1, 0, 0, 128, 128);
-}
+            for (let i = 0; i < pred.data.length; i++) {
+                const value = pred.data[i];
+                const color = value < threshold ? 255 : 0;
+                myImageData.data[i * 4] = color;
+                myImageData.data[i * 4 + 1] = color;
+                myImageData.data[i * 4 + 2] = color;
+                myImageData.data[i * 4 + 3] = 255;
+            }
 
-async function bgRemoval() {
-    if (!session) return;
-    const ctx = document.getElementById("canvasZY").getContext("2d");
-    const imageData = ctx.getImageData(0, 0, 128, 128);
-    const resizedData = imageData.data;
-    const floatArr = new Float32Array(128*128*3);
-    for (let i=0,j=0;i<resizedData.length;i+=4,j++){
-        floatArr[j]=(resizedData[i]/255-0.485)/0.229;
-        floatArr[j+16384]=(resizedData[i+1]/255-0.456)/0.224;
-        floatArr[j+32768]=(resizedData[i+2]/255-0.406)/0.225;
-    }
-    const inputTensor=new ort.Tensor('float32',floatArr,[1,3,128,128]);
-    const results=await session.run({ "input.1":inputTensor });
-    const pred=Object.values(results)[0];
-    const minVal=Math.min(...pred.data),maxVal=Math.max(...pred.data);
-    const threshold=(maxVal-minVal)*0.5+minVal;
-    const imageOut=finalCtx.createImageData(128,128);
-    for(let i=0;i<pred.data.length;i++){
-        const val=pred.data[i];
-        const color=val<threshold?255:0;
-        imageOut.data[i*4]=imageOut.data[i*4+1]=imageOut.data[i*4+2]=color;
-        imageOut.data[i*4+3]=255;
-    }
-    finalCtx.putImageData(imageOut,0,0);
-}
-
-xyButton.onclick = async () => {
-    await bgRemoval();
-    savedXYData = ctx2.getImageData(0, 0, 128, 128);
-    processXY();
-    logMessage("XY attēls saglabāts");
-};
-
-zyButton.onclick = async () => {
-    await bgRemoval();
-    savedZYData = ctx2.getImageData(0, 0, 128, 128);
-    processZY();
-    logMessage("ZY attēls saglabāts");
-};
-
-function processXY(){
-    const imgData = finalCtx.getImageData(0,0,128,128);
-    pointsXY = Array(128).fill().map(()=>Array(128).fill(false));
-    for(let y=0;y<128;y++){
-        for(let x=0;x<128;x++){
-            const i=(y*128+x)*4;
-            if(imgData.data[i]===0) pointsXY[x][y]=true;
+            intermediateCtx.putImageData(myImageData, 0, 0);
+            finalCanvas.width = 128;
+            finalCanvas.height = 128;
+            finalCtx.clearRect(0, 0, finalCanvas.width, finalCanvas.height);
+            finalCtx.drawImage(intermediateCanvas, 0, 0, 128, 128, 0, 0, finalCanvas.width, finalCanvas.height);
+            
+            return intermediateCanvas;
         }
-    }
-}
 
-function processZY(){
-    const imgData = finalCtx.getImageData(0,0,128,128);
-    pointsZY = Array(128).fill().map(()=>Array(128).fill(false));
-    for(let y=0;y<128;y++){
-        for(let z=0;z<128;z++){
-            const i=(y*128+z)*4;
-            if(imgData.data[i]===0) pointsZY[z][y]=true;
+        function isMobile() {
+            return /Mobi|Android|iPhone|iPad|iPod|BlackBerry|Windows Phone/i.test(navigator.userAgent);
         }
-    }
-}
 
-function findCommonPoints(){
-    commonPoints=[];
-    if(!savedXYData||!savedZYData){logMessage("Nav XY un ZY datu.");return;}
-    let sumX=0,sumY=0,sumZ=0,count=0;
-    for(let x=0;x<128;x++){
-        for(let y=0;y<128;y++){
-            for(let z=0;z<128;z++){
-                if(pointsXY[x][y]&&pointsZY[z][y]){
-                    const pixXY=(y*128+x)*4,pixZY=(y*128+z)*4;
-                    const r=(savedXYData.data[pixXY]+savedZYData.data[pixZY])/2;
-                    const g=(savedXYData.data[pixXY+1]+savedZYData.data[pixZY+1])/2;
-                    const b=(savedXYData.data[pixXY+2]+savedZYData.data[pixZY+2])/2;
-                    commonPoints.push({x,y,z,color:{r,g,b}});
-                    sumX+=x;sumY+=y;sumZ+=z;count++;
-                }
+        // Log function to display messages
+        function logMessage(message) {
+            log.textContent = `${message}`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        async function startVideoStream() {
+            const constraints = {
+                video: isMobile() ? { facingMode: { exact: "environment" } } : true
+            };
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video1.srcObject = stream;
+                processFrame();
+            } catch (err) {
+                console.error('Error accessing the camera: ', err);
+                logMessage('Kļūda piekļūstot kamerai: ' + err.message);
             }
         }
-    }
-    const avgX=sumX/count,avgY=sumY/count,avgZ=sumZ/count;
-    commonPoints.forEach(p=>{p.x-=avgX;p.y-=avgY;p.z-=avgZ;});
-}
 
-downloadButton.onclick = () => {
-    findCommonPoints();
-    visualizePointCloud();
-    resetButton.style.display = "inline-block";
-    saveButton.style.display = "inline-block";
-};
+        // Capture and process the frame in real-time
+        function processFrame() {
+            requestAnimationFrame(processFrame);
+            ctx1.drawImage(video1, 0, 0, 128, 128);
+            ctx2.drawImage(video1, 0, 0, 128, 128);
+            ctxZY.drawImage(video1, 0, 0, 128, 128);
+        }
 
-function visualizePointCloud(){
-    threeContainer.innerHTML="";
-    scene=new THREE.Scene();
-    camera=new THREE.PerspectiveCamera(75,threeContainer.clientWidth/threeContainer.clientHeight,0.1,1500);
-    renderer=new THREE.WebGLRenderer({antialias:true});
-    renderer.setSize(threeContainer.clientWidth,threeContainer.clientHeight);
-    threeContainer.appendChild(renderer.domElement);
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping=true;
-    controls.enableZoom=true;
+        // Capture image at current rotation
+        captureButton.addEventListener('click', async () => {
+            if (capturedFrames.length >= 5) {
+                logMessage("Jau uzņemti 5 attēli. Sāciet no jauna vai izveidojiet punktu mākoni.");
+                return;
+            }
 
-    const geometry=new THREE.BufferGeometry();
-    const vertices=[],colors=[];
-    commonPoints.forEach(p=>{
-        vertices.push(p.x*10,-p.y*10,p.z*10);
-        colors.push(p.color.r/255,p.color.g/255,p.color.b/255);
-    });
-    geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
-    geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-    material=new THREE.PointsMaterial({vertexColors:true,size:thresholdSlider.value,sizeAttenuation:false});
-    pointCloud=new THREE.Points(geometry,material);
-    scene.add(pointCloud);
-    camera.position.set(0,250,1000);
+            logMessage(`Uzņemts attēls ${currentRotation}° rotācijā`);
+            
+            // Capture current frame
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = 128;
+            tempCanvas.height = 128;
+            tempCtx.drawImage(video1, 0, 0, 128, 128);
+            
+            // Apply background removal
+            await bgRemoval();
+            
+            // Get the mask from the processed image
+            const maskCanvas = document.createElement('canvas');
+            const maskCtx = maskCanvas.getContext('2d');
+            maskCanvas.width = 128;
+            maskCanvas.height = 128;
+            maskCtx.drawImage(finalCanvas, 0, 0);
+            
+            // Store the captured data
+            capturedFrames.push({
+                rotation: currentRotation,
+                colorImage: tempCanvas,
+                maskImage: maskCanvas,
+                colorData: tempCtx.getImageData(0, 0, 128, 128),
+                maskData: maskCtx.getImageData(0, 0, 128, 128)
+            });
+            
+            // Display thumbnail
+            const thumbCanvas = document.createElement('canvas');
+            const thumbCtx = thumbCanvas.getContext('2d');
+            thumbCanvas.width = 64;
+            thumbCanvas.height = 64;
+            thumbCtx.drawImage(tempCanvas, 0, 0, 64, 64);
+            
+            const img = document.createElement('img');
+            img.src = thumbCanvas.toDataURL();
+            img.className = 'captured-image';
+            img.title = `${currentRotation}°`;
+            capturedImages.appendChild(img);
+            
+            // Update UI
+            currentRotation += 45;
+            captureCount.textContent = `${capturedFrames.length}/5`;
+            
+            if (capturedFrames.length >= 5) {
+                captureButton.disabled = true;
+                logMessage("Visi 5 attēli uzņemti. Varat izveidot punktu mākoni.");
+            }
+        });
 
-    function animate(){
-        requestAnimationFrame(animate);
-        controls.update();
-        renderer.render(scene,camera);
-    }
-    animate();
+        // Reset captured images
+        resetButton.addEventListener('click', () => {
+            capturedFrames = [];
+            currentRotation = 0;
+            capturedImages.innerHTML = '';
+            captureCount.textContent = '0/5';
+            captureButton.disabled = false;
+            logMessage("Uzņemtie attēli notīrīti. Sāciet no jauna.");
+        });
 
-    thresholdSlider.oninput = () => { material.size = thresholdSlider.value; };
-}
+        // Generate 3D point cloud from captured images
+        function generatePointCloud() {
+            points3D = [];
+            
+            if (capturedFrames.length === 0) {
+                logMessage("Nav uzņemtu attēlu. Lūdzu, uzņemiet attēlus vispirms.");
+                return;
+            }
+            
+            // For each captured frame, extract points based on the mask
+            capturedFrames.forEach((frame, frameIndex) => {
+                const rotation = frame.rotation;
+                const colorData = frame.colorData;
+                const maskData = frame.maskData;
+                
+                // Convert rotation to radians for 3D coordinates
+                const angle = rotation * Math.PI / 180;
+                
+                // Process each pixel in the mask
+                for (let y = 0; y < 128; y++) {
+                    for (let x = 0; x < 128; x++) {
+                        const pixelIndex = (y * 128 + x) * 4;
+                        
+                        // Check if this pixel is part of the object (black in mask)
+                        if (maskData.data[pixelIndex] === 0) {
+                            // Get color from original image
+                            const r = colorData.data[pixelIndex];
+                            const g = colorData.data[pixelIndex + 1];
+                            const b = colorData.data[pixelIndex + 2];
+                            
+                            // Convert 2D coordinates to 3D based on rotation
+                            // X and Z are calculated based on rotation around Y-axis
+                            const radius = (x - 64) / 2; // Center and scale
+                            const x3d = radius * Math.cos(angle);
+                            const z3d = radius * Math.sin(angle);
+                            const y3d = (64 - y) / 2; // Flip Y and scale
+                            
+                            points3D.push({
+                                x: x3d,
+                                y: y3d,
+                                z: z3d,
+                                color: { r, g, b }
+                            });
+                        }
+                    }
+                }
+            });
+            
+            // Center the point cloud
+            centerPointCloud();
+            
+            logMessage(`Izveidots punktu mākonis ar ${points3D.length} punktiem`);
+        }
+        
+        function centerPointCloud() {
+            if (points3D.length === 0) return;
+            
+            let sumX = 0, sumY = 0, sumZ = 0;
+            
+            points3D.forEach(point => {
+                sumX += point.x;
+                sumY += point.y;
+                sumZ += point.z;
+            });
+            
+            const avgX = sumX / points3D.length;
+            const avgY = sumY / points3D.length;
+            const avgZ = sumZ / points3D.length;
+            
+            // Adjust points to center at (0, 0, 0)
+            points3D.forEach(point => {
+                point.x -= avgX;
+                point.y -= avgY;
+                point.z -= avgZ;
+            });
+        }
 
-resetButton.onclick = () => {
-    pointsXY=[]; pointsZY=[]; commonPoints=[];
-    threeContainer.innerHTML="";
-    logMessage("Atiestatīts!");
-    resetButton.style.display = "none";
-    saveButton.style.display = "none";
-};
+        // Download and visualize the point cloud
+        downloadButton.addEventListener('click', () => {
+            generatePointCloud();
+            downloadPointCloud();
+        });
 
-saveButton.onclick = () => {
-    let ply=`ply\nformat ascii 1.0\nelement vertex ${commonPoints.length}\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n`;
-    commonPoints.forEach(p=>{
-        ply+=`${p.x} ${-p.y} ${p.z} ${Math.floor(p.color.r)} ${Math.floor(p.color.g)} ${Math.floor(p.color.b)}\n`;
-    });
-    const blob=new Blob([ply],{type:'text/plain'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='3dPunkti.ply';
-    a.click();
-};
-</script>
+        function downloadPointCloud() {
+            if (points3D.length === 0) {
+                logMessage("Nav punktu, ko lejupielādēt. Vispirms uzņemiet attēlus.");
+                return;
+            }
+
+            // Start building the PLY header
+            let plyData = `ply\n`;
+            plyData += `format ascii 1.0\n`;
+            plyData += `element vertex ${points3D.length}\n`;
+            plyData += `property float x\n`;
+            plyData += `property float y\n`;
+            plyData += `property float z\n`;
+            plyData += `property uchar red\n`;
+            plyData += `property uchar green\n`;
+            plyData += `property uchar blue\n`;
+            plyData += `end_header\n`;
+
+            // Add each point with color
+            points3D.forEach(point => {
+                const { x, y, z, color } = point;
+                plyData += `${x} ${y} ${z} ${color.r} ${color.g} ${color.b}\n`;
+            });
+
+            // Create a Blob and initiate download
+            const blob = new Blob([plyData], { type: 'text/plain' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = '3dPunkti.ply';
+            link.click();
+
+            visualizePointCloud();
+        }
+
+        function visualizePointCloud() {
+            threeContainer.innerHTML = '';
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, threeContainer.clientWidth / threeContainer.clientHeight, 0.1, 1500);
+            renderer = new THREE.WebGLRenderer();
+            renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+            threeContainer.appendChild(renderer.domElement);
+
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const colors = [];
+
+            points3D.forEach(point => {
+                const { x, y, z, color } = point;
+                vertices.push(x, y, z);
+                colors.push(color.r / 255, color.g / 255, color.b / 255);
+            });
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+            material = new THREE.PointsMaterial({ 
+                vertexColors: true, 
+                size: parseFloat(thresholdSlider.value), 
+                sizeAttenuation: false 
+            });
+            
+            pointCloud = new THREE.Points(geometry, material);
+            scene.add(pointCloud);
+
+            camera.position.set(0, 0, 500);
+
+            function animate() {
+                requestAnimationFrame(animate);
+                pointCloud.rotation.y += 0.005;
+                renderer.render(scene, camera);
+            }
+
+            animate();
+
+            thresholdSlider.addEventListener('input', () => {
+                material.size = parseFloat(thresholdSlider.value);
+            });
+        }
+
+        // Start video stream
+        startVideoStream();
+    </script>
 </body>
 </html>
