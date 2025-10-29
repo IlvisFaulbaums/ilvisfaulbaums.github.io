@@ -1,244 +1,181 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>3D Skeneris ar vizualizāciju (Fix: ONNX on XY/ZY)</title>
-<style>
-    body { font-family: Arial, sans-serif; text-align:center; background:#fafafa; }
-    canvas { border:1px solid black; margin:5px; }
-    #threeContainer { width:100%; height:400px; margin-top:10px; }
-    #log { margin-top:10px; font-family:monospace; background:#f0f0f0; padding:10px; border:1px solid #ccc; text-align:left; overflow-y:auto; max-height:100px; }
-    button, input[type=range] { margin:10px; padding:15px 25px; font-size:1.2em; border:none; border-radius:10px; background:#007bff; color:white; cursor:pointer; transition:0.2s ease; }
-    button:hover { background:#0056b3; }
-    @media (max-width:768px) {
-        button, input[type=range] { width:90%; font-size:1.4em; padding:20px; }
-        #threeContainer { height:300px; }
-    }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Scanner with ONNX Background Removal</title>
+  <style>
+    canvas { border: 1px solid black; }
+    #threeContainer { width: 100%; height: 400px; }
+    #log { margin-top: 10px; font-family: Arial, sans-serif; background-color: #f0f0f0; padding: 10px; border: 1px solid #ccc; }
+    .camera-controls { margin: 10px 0; }
+    button { margin: 5px; padding: 8px 15px; }
+  </style>
 </head>
 <body>
+  <h2>3D Scanner with Camera Coordinates (ONNX Background Removal)</h2>
+  
+  <div class="camera-controls">
+    <button id="captureXY">Capture XY</button>
+    <button id="captureZY">Capture ZY</button>
+    <button id="resetScan">Reset Scan</button>
+    <span id="frameCount">Frames: 0</span>
+  </div>
 
-<h2>3D Skeneris</h2>
-<video id="video1" autoplay width="128" height="128"></video>
-<canvas id="canvasZY" width="128" height="128" style="display:inline-block"></canvas>
-<canvas id="canvasOnnx" width="128" height="128" style="display:inline-block"></canvas>
-<canvas id="canvas1" width="0" height="0"></canvas>
-<canvas id="canvas2" width="0" height="0"></canvas>
+  <video id="video1" autoplay width="320" height="240"></video>
+  <canvas id="canvasProcessed" width="320" height="240"></canvas>
+  <canvas id="canvasOnnx" width="320" height="240"></canvas>
 
-<br>
-<label for="thresholdSlider">Punktu lielums:</label><br>
-<input type="range" id="thresholdSlider" min="0.5" max="10" value="5" step="0.1"><br>
+  <br>
+  <button id="downloadButton">Download & Visualize Point Cloud</button>
 
-<button id="xyButton">XY (fona noņemšana)</button>
-<button id="zyButton">ZY (fona noņemšana)</button>
-<button id="downloadButton">Lejupielādēt un Vizualizēt Punktu Mākoni</button>
-<button id="resetButton" style="display:none; background:#dc3545;">Atiestatīt</button>
-<button id="saveButton" style="display:none; background:#28a745;">Saglabāt PLY</button>
+  <div id="log">Info: Ready</div>
+  <div id="threeContainer"></div>
 
-<div id="log">Info:</div>
-<div id="threeContainer"></div>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.130.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js"></script>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.130.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.130.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js" defer></script>
+  <script>
+  const video1 = document.getElementById('video1');
+  const canvasProcessed = document.getElementById('canvasProcessed');
+  const ctxProcessed = canvasProcessed.getContext('2d');
+  const canvasOnnx = document.getElementById('canvasOnnx');
+  const ctxOnnx = canvasOnnx.getContext('2d');
+  const log = document.getElementById('log');
+  const frameCount = document.getElementById('frameCount');
 
-<script>
-let session, scene, camera, renderer, pointCloud, material, controls;
-let pointsXY = [], pointsZY = [], commonPoints = [];
-let savedXYData = null, savedZYData = null;
-let isInverted = false;
+  const captureXY = document.getElementById('captureXY');
+  const captureZY = document.getElementById('captureZY');
+  const resetScan = document.getElementById('resetScan');
+  const downloadButton = document.getElementById('downloadButton');
 
-const video1 = document.getElementById('video1');
-const canvas1 = document.getElementById('canvas1');
-const ctx1 = canvas1.getContext('2d');
-const ctx2 = document.getElementById('canvasZY').getContext('2d');
-const finalCanvas = document.getElementById("canvasOnnx");
-const finalCtx = finalCanvas.getContext("2d");
-const xyButton = document.getElementById('xyButton');
-const zyButton = document.getElementById('zyButton');
-const downloadButton = document.getElementById('downloadButton');
-const resetButton = document.getElementById('resetButton');
-const saveButton = document.getElementById('saveButton');
-const thresholdSlider = document.getElementById('thresholdSlider');
-const log = document.getElementById('log');
-const threeContainer = document.getElementById('threeContainer');
+  let session;
+  let savedXY = null;
+  let savedZY = null;
+  let pointCloud = [];
 
-function logMessage(msg){ log.textContent = msg; }
+  function logMessage(msg) {
+    log.textContent = msg;
+    console.log(msg);
+  }
 
-// 🧹 CLEANUP FUNCTION
-async function cleanUpMemory() {
-    console.log("🧹 Cleaning up unused data...");
-    // Clear visible canvases (small ones)
-    [ctx1, finalCtx].forEach(ctx => { if (ctx) ctx.clearRect(0,0,128,128); });
-
-    // Dispose Three.js objects if they exist
-    if (renderer) {
-        if (scene) {
-            scene.traverse(obj => {
-                if (obj.geometry) obj.geometry.dispose();
-                if (obj.material) {
-                    if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
-                    else obj.material.dispose();
-                }
-            });
-        }
-        try { renderer.dispose(); renderer.forceContextLoss(); } catch(e){/*ignore*/ }
-        try { if (renderer.domElement && renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); } catch(e){}
-        renderer = null;
-    }
-
-    // Clear large data arrays
-    pointsXY = [];
-    pointsZY = [];
-    commonPoints = [];
-    savedXYData = null;
-    savedZYData = null;
-
-    // Revoke object URLs
-    if (window.lastImageURL) { URL.revokeObjectURL(window.lastImageURL); window.lastImageURL = null; }
-
-    // Try releasing ONNX memory (best-effort)
-    if (session) {
-        try { await session.release?.(); } catch(e) { /*ignore*/ }
-    }
-
-    if (window.gc) window.gc();
-    logMessage("Atmiņa attīrīta!");
-}
-
-// Stop camera safely
-function stopVideoStream() {
-    const stream = video1.srcObject;
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        video1.srcObject = null;
-    }
-}
-
-// Mobile check
-function isMobile() { return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent); }
-
-// Load ONNX model
-window.onload = async function() {
+  async function startVideoStream() {
     try {
-        logMessage("Ielādē modeli...");
-        session = await ort.InferenceSession.create('./u2netp_128.onnx', { executionProviders: ['wasm'] });
-        logMessage("Modelis ielādēts! Gatavs.");
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+      video1.srcObject = stream;
+      drawFrame();
     } catch (e) {
-        console.error("ONNX load error:", e);
-        logMessage("Neizdevās ielādēt ONNX modeli. Skatīt konsoli.");
+      logMessage("Camera error: " + e);
     }
-    startVideoStream();
-};
+  }
 
-async function startVideoStream() {
-    const constraints = { video: isMobile() ? { facingMode: { exact: "environment" } } : true };
+  function drawFrame() {
+    if (video1.videoWidth > 0) {
+      ctxProcessed.drawImage(video1, 0, 0, 320, 240);
+    }
+    requestAnimationFrame(drawFrame);
+  }
+
+  window.onload = async function() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video1.srcObject = stream;
-        processFrame();
+      session = await ort.InferenceSession.create('./u2netp_128.onnx', { executionProviders: ['wasm'] });
+      logMessage("✅ ONNX model loaded");
     } catch (err) {
-        console.error('Camera error:', err);
-        logMessage('Kamera nav pieejama: ' + err.message);
+      logMessage("❌ Failed to load ONNX: " + err.message);
     }
-}
+  };
 
-function processFrame() {
-    requestAnimationFrame(processFrame);
-    // draw into canvas1 (hidden) and canvasZY (visible) for preview
+  // ONNX Background removal
+  async function bgRemoval(inputCanvas) {
+    const ctx = inputCanvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, 320, 240);
+
+    // Resize for model
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCanvas.width = 128;
+    tempCanvas.height = 128;
+    tempCtx.drawImage(inputCanvas, 0, 0, 320, 240, 0, 0, 128, 128);
+
+    const resized = tempCtx.getImageData(0, 0, 128, 128).data;
+    const input = new Float32Array(1 * 3 * 128 * 128);
+    for (let i = 0, j = 0; i < resized.length; i += 4, j++) {
+      input[j] = (resized[i] / 255 - 0.485) / 0.229;
+      input[j + 128 * 128] = (resized[i + 1] / 255 - 0.456) / 0.224;
+      input[j + 2 * 128 * 128] = (resized[i + 2] / 255 - 0.406) / 0.225;
+    }
+
+    const tensor = new ort.Tensor('float32', input, [1, 3, 128, 128]);
+    const result = await session.run({ 'input.1': tensor });
+    const output = result[Object.keys(result)[0]].data;
+
+    // Convert output to grayscale mask
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = 128;
+    maskCanvas.height = 128;
+    const maskCtx = maskCanvas.getContext('2d');
+    const maskImage = maskCtx.createImageData(128, 128);
+
+    const min = Math.min(...output);
+    const max = Math.max(...output);
+    const threshold = min + (max - min) * 0.5;
+
+    for (let i = 0; i < output.length; i++) {
+      const v = output[i];
+      const color = v > threshold ? 255 : 0;
+      maskImage.data[i * 4] = color;
+      maskImage.data[i * 4 + 1] = color;
+      maskImage.data[i * 4 + 2] = color;
+      maskImage.data[i * 4 + 3] = 255;
+    }
+
+    maskCtx.putImageData(maskImage, 0, 0);
+    return maskCanvas;
+  }
+
+  // Capture XY or ZY
+  async function captureFrame(label) {
     try {
-        ctx1.drawImage(video1, 0, 0, 128, 128);
-        ctx2.drawImage(video1, 0, 0, 128, 128);
-    } catch(e) { /* might throw while stream not ready */ }
-}
+      const snapCanvas = document.createElement('canvas');
+      snapCanvas.width = 320;
+      snapCanvas.height = 240;
+      snapCanvas.getContext('2d').drawImage(video1, 0, 0, 320, 240);
 
-// ONNX background removal — reads from canvasZY and writes mask to canvasOnnx
-async function bgRemoval() {
-    if (!session) { logMessage("Modelis nav gatavs — gaidiet..."); return false; }
-    logMessage("Fona noņemšana (ONNX)...");
-    try {
-        // Read current preview from canvasZY
-        const ctxSrc = document.getElementById("canvasZY").getContext("2d");
-        const imageData = ctxSrc.getImageData(0, 0, 128, 128);
-        const data = imageData.data;
+      const mask = await bgRemoval(snapCanvas);
 
-        // Prepare input float array in [1,3,128,128] with normalization
-        const floatArr = new Float32Array(128 * 128 * 3);
-        for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-            floatArr[j] = (data[i] / 255 - 0.485) / 0.229;
-            floatArr[j + 16384] = (data[i + 1] / 255 - 0.456) / 0.224;
-            floatArr[j + 32768] = (data[i + 2] / 255 - 0.406) / 0.225;
-        }
+      // Draw on preview canvas
+      ctxOnnx.clearRect(0, 0, 320, 240);
+      ctxOnnx.drawImage(mask, 0, 0, 128, 128, 0, 0, 320, 240);
 
-        const inputTensor = new ort.Tensor('float32', floatArr, [1, 3, 128, 128]);
-        const results = await session.run({ "input.1": inputTensor });
-        const pred = Object.values(results)[0]; // get output tensor
-        const out = pred.data;
+      if (label === 'XY') savedXY = mask;
+      if (label === 'ZY') savedZY = mask;
 
-        // compute threshold and build binary image (white background, black foreground)
-        let minVal = Infinity, maxVal = -Infinity;
-        for (let i = 0; i < out.length; i++) {
-            if (out[i] < minVal) minVal = out[i];
-            if (out[i] > maxVal) maxVal = out[i];
-        }
-        const threshold = (maxVal - minVal) * 0.5 + minVal;
-
-        const outImage = finalCtx.createImageData(128, 128);
-        for (let i = 0; i < out.length; i++) {
-            const v = out[i];
-            const color = v < threshold ? 0 : 255; // 0 = foreground (black), 255 = background (white)
-            // We'll make foreground black, background white (matching prior code)
-            outImage.data[i * 4] = color;
-            outImage.data[i * 4 + 1] = color;
-            outImage.data[i * 4 + 2] = color;
-            outImage.data[i * 4 + 3] = 255;
-        }
-
-        // Put mask into canvasOnnx (finalCanvas)
-        finalCtx.putImageData(outImage, 0, 0);
-        logMessage("Fona noņemšana pabeigta.");
-        return true;
-    } catch (err) {
-        console.error("bgRemoval error:", err);
-        logMessage("Kļūda fona noņemšanā: " + err.message);
-        return false;
+      frameCount.textContent = `Frames: ${(savedXY ? 1 : 0) + (savedZY ? 1 : 0)}`;
+      logMessage(`✅ ${label} captured with background removed`);
+    } catch (e) {
+      logMessage("Capture failed: " + e.message);
     }
-}
+  }
 
-// IMPORTANT FIXED: do NOT call cleanUpMemory() BEFORE bgRemoval()
-// On XY: run bgRemoval(), then save the ONNX result from canvasOnnx
-xyButton.onclick = async () => {
-    if (!session) { logMessage("Modelis vēl nav gatavs."); return; }
-    xyButton.disabled = true;
-    xyButton.textContent = "Apstrādā (XY)...";
-    const ok = await bgRemoval();
-    if (ok) {
-        // Save processed mask from canvasOnnx (finalCtx) — not the raw preview
-        savedXYData = finalCtx.getImageData(0, 0, 128, 128);
-        processXY();
-        logMessage("XY attēls (ONNX maska) saglabāts.");
+  captureXY.onclick = () => captureFrame('XY');
+  captureZY.onclick = () => captureFrame('ZY');
+
+  resetScan.onclick = () => {
+    savedXY = savedZY = null;
+    frameCount.textContent = "Frames: 0";
+    ctxOnnx.clearRect(0, 0, 320, 240);
+    logMessage("🔄 Reset complete");
+  };
+
+  downloadButton.onclick = () => {
+    if (!savedXY || !savedZY) {
+      logMessage("Need both XY and ZY before generating 3D cloud");
+      return;
     }
-    xyButton.disabled = false;
-    xyButton.textContent = "XY (fona noņemšana)";
-};
+    logMessage("3D reconstruction placeholder — add point fusion here.");
+  };
 
-// On ZY: same logic
-zyButton.onclick = async () => {
-    if (!session) { logMessage("Modelis vēl nav gatavs."); return; }
-    zyButton.disabled = true;
-    zyButton.textContent = "Apstrādā (ZY)...";
-    const ok = await bgRemoval();
-    if (ok) {
-        // Save processed mask from canvasOnnx (finalCtx)
-        savedZYData = finalCtx.getImageData(0, 0, 128, 128);
-        processZY();
-        logMessage("ZY attēls (ONNX maska) saglabāts.");
-    }
-    zyButton.disabled = false;
-    zyButton.textContent = "ZY (fona noņemšana)";
-};
-
-function processXY(){
-    const imgData = finalCtx.getImageData(0,0,128,128);
-    pointsXY = Array(
+  startVideoStream();
+  </script>
+</body>
+</html>
