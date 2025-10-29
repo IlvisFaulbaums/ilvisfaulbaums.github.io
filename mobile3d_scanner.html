@@ -25,7 +25,6 @@
     <div class="section">
         <div class="capture-area">
             <video id="video1" autoplay width="128" height="128"></video>
-            <canvas id="canvasZY" width="128" height="128"></canvas>
             <canvas id="canvasOnnx" width="128" height="128"></canvas>
             <canvas id="canvas1" width="0" height="0"></canvas>
             <canvas id="canvas2" width="0" height="0"></canvas>
@@ -46,7 +45,7 @@
         <div class="view-group">
             <h3>XZ Template (no augšas)</h3>
             <div class="controls">
-                <button id="xzButton">XZ attēls</button>
+                <button id="xzButton">XZ attēls (no augšas)</button>
                 <button id="generateTemplate">Ģenerēt template</button>
             </div>
             <div class="point-info">Template mākonis: <span id="pointCount2">0</span> punkti</div>
@@ -146,14 +145,14 @@
         const autoApplyToggle = document.getElementById('autoApplyToggle');
         const resetRotation = document.getElementById('resetRotation');
         
-        const canvas2 = document.getElementById('canvasZY');
+        const canvas2 = document.createElement('canvas');
         const ctx2 = canvas2.getContext('2d');
-        const canvasZY = document.getElementById('canvasZY');
-        const ctxZY = canvasZY.getContext('2d');
+        canvas2.width = 128;
+        canvas2.height = 128;
         
         let session;
         let mainCloudData = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null };
-        let templateData = { pointsXZ: [], savedXZData: null };
+        let templateData = { savedXZData: null, maskData: null };
         let originalPointCloud = [];
         let templatePointCloud = [];
         let filteredPointCloud = [];
@@ -231,36 +230,22 @@
             }
         };
 
-        // Background removal function
-        async function bgRemoval() {
+        // Background removal function for XZ template
+        async function bgRemovalForXZ() {
             if (!session) {
                 console.error("ONNX model is not loaded yet.");
-                return;
+                return null;
             }
 
-            const canvas = document.getElementById("canvasZY");
-            const ctx = canvas.getContext("2d");
-            const imageData = ctx.getImageData(0, 0, 128, 128);
-
-            const offscreenCanvas = document.createElement('canvas');
-            const offscreenCtx = offscreenCanvas.getContext('2d');
-            offscreenCanvas.width = 128;
-            offscreenCanvas.height = 128;
-            offscreenCtx.putImageData(imageData, 0, 0);
-            
-            const resizedCanvas = document.createElement('canvas');
-            const resizedCtx = resizedCanvas.getContext('2d');
-            resizedCanvas.width = 128;
-            resizedCanvas.height = 128;
-            resizedCtx.drawImage(offscreenCanvas, 0, 0, 128, 128, 0, 0, 128, 128);
-
-            const resizedImageData = resizedCtx.getImageData(0, 0, 128, 128).data;
+            // Capture current frame from video
+            ctx2.drawImage(video1, 0, 0, 128, 128);
+            const imageData = ctx2.getImageData(0, 0, 128, 128);
 
             const floatArr = new Float32Array(128 * 128 * 3);
-            for (let i = 0, j = 0; i < resizedImageData.length; i += 4, j++) {
-                floatArr[j] = (resizedImageData[i] / 255 - 0.485) / 0.229;
-                floatArr[j + 16384] = (resizedImageData[i + 1] / 255 - 0.456) / 0.224;
-                floatArr[j + 32768] = (resizedImageData[i + 2] / 255 - 0.406) / 0.225;
+            for (let i = 0, j = 0; i < imageData.data.length; i += 4, j++) {
+                floatArr[j] = (imageData.data[i] / 255 - 0.485) / 0.229;
+                floatArr[j + 16384] = (imageData.data[i + 1] / 255 - 0.456) / 0.224;
+                floatArr[j + 32768] = (imageData.data[i + 2] / 255 - 0.406) / 0.225;
             }
 
             const inputTensor = new ort.Tensor('float32', floatArr, [1, 3, 128, 128]);
@@ -289,10 +274,35 @@
 
             intermediateCtx.putImageData(myImageData, 0, 0);
 
+            // Update display canvas
             finalCanvas.width = 128;
             finalCanvas.height = 128;
             finalCtx.clearRect(0, 0, finalCanvas.width, finalCanvas.height);
-            finalCtx.drawImage(intermediateCanvas, 0, 0, 128, 128, 0, 0, finalCanvas.width, finalCanvas.height);
+            finalCtx.drawImage(intermediateCanvas, 0, 0);
+
+            return intermediateCtx.getImageData(0, 0, 128, 128);
+        }
+
+        // Simple threshold for main cloud (no ONNX)
+        async function simpleThreshold() {
+            ctx2.drawImage(video1, 0, 0, 128, 128);
+            const imageData = ctx2.getImageData(0, 0, 128, 128);
+            
+            // Simple grayscale threshold
+            for (let i = 0; i < imageData.data.length; i += 4) {
+                const avg = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
+                const value = avg < 128 ? 0 : 255;
+                imageData.data[i] = value;
+                imageData.data[i + 1] = value;
+                imageData.data[i + 2] = value;
+            }
+            
+            finalCanvas.width = 128;
+            finalCanvas.height = 128;
+            finalCtx.clearRect(0, 0, finalCanvas.width, finalCanvas.height);
+            finalCtx.putImageData(imageData, 0, 0);
+            
+            return imageData;
         }
 
         function isMobile() {
@@ -322,40 +332,36 @@
         function processFrame() {
             requestAnimationFrame(processFrame);
             ctx1.drawImage(video1, 0, 0, 128, 128);
-            ctx2.drawImage(video1, 0, 0, 128, 128);
-            ctxZY.drawImage(video1, 0, 0, 128, 128);
         }
 
         // Process functions
         xyButton.addEventListener('click', async () => {
-            await bgRemoval();
+            const imageData = await simpleThreshold();
             mainCloudData.savedXYData = ctx2.getImageData(0, 0, 128, 128);
-            processXY();
+            processXY(imageData);
             logMessage("Galvenais mākonis: XY attēls procesēts");
         });
 
         zyButton.addEventListener('click', async () => {
-            await bgRemoval();
+            const imageData = await simpleThreshold();
             mainCloudData.savedZYData = ctx2.getImageData(0, 0, 128, 128);
-            processZY();
+            processZY(imageData);
             logMessage("Galvenais mākonis: ZY attēls procesēts");
         });
 
         xzButton.addEventListener('click', async () => {
-            await bgRemoval();
+            templateData.maskData = await bgRemovalForXZ();
             templateData.savedXZData = ctx2.getImageData(0, 0, 128, 128);
-            processXZ();
-            logMessage("XZ Template: XZ attēls procesēts");
+            logMessage("XZ Template: Attēls no augšas procesēts ar ONNX");
         });
 
-        function processXY() {
-            const imgData = finalCtx.getImageData(0, 0, 128, 128);
+        function processXY(imageData) {
             mainCloudData.pointsXY = new Array(128).fill().map(() => new Array(128).fill(false));
 
             for (let y = 0; y < 128; y++) {
                 for (let x = 0; x < 128; x++) {
                     const pixelIndex = (y * 128 + x) * 4;
-                    if (imgData.data[pixelIndex] === 0) {
+                    if (imageData.data[pixelIndex] === 0) {
                         for (let z = 0; z < 128; z++) {
                             mainCloudData.pointsXY[x][y] = true;
                         }
@@ -364,33 +370,15 @@
             }
         }
 
-        function processZY() {
-            const imgData = finalCtx.getImageData(0, 0, 128, 128);
+        function processZY(imageData) {
             mainCloudData.pointsZY = new Array(128).fill().map(() => new Array(128).fill(false));
 
             for (let y = 0; y < 128; y++) {
                 for (let z = 0; z < 128; z++) {
                     const pixelIndex = (y * 128 + z) * 4;
-                    if (imgData.data[pixelIndex] === 0) {
+                    if (imageData.data[pixelIndex] === 0) {
                         for (let x = 0; x < 128; x++) {
                             mainCloudData.pointsZY[z][y] = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        function processXZ() {
-            const imgData = finalCtx.getImageData(0, 0, 128, 128);
-            templateData.pointsXZ = new Array(128).fill().map(() => new Array(128).fill(false));
-
-            // XZ plakne - no augšas skats
-            for (let z = 0; z < 128; z++) {
-                for (let x = 0; x < 128; x++) {
-                    const pixelIndex = (64 * 128 + x) * 4; // Centra līnija Y=64
-                    if (imgData.data[pixelIndex] === 0) {
-                        for (let y = 0; y < 128; y++) {
-                            templateData.pointsXZ[x][z] = true;
                         }
                     }
                 }
@@ -408,8 +396,12 @@
             visualizePointClouds();
         });
 
-        // Generate template from XZ
+        // Generate template from XZ (using ONNX mask)
         generateTemplate.addEventListener('click', () => {
+            if (!templateData.maskData) {
+                logMessage("Vispirms uzņemiet XZ attēlu");
+                return;
+            }
             templatePointCloud = createXZTemplate(templateData);
             pointCount2.textContent = templatePointCloud.length;
             logMessage(`XZ Template izveidots: ${templatePointCloud.length} punkti`);
@@ -420,32 +412,28 @@
             applyTemplateFilter();
         });
 
-        // Create XZ template (2D from top view)
+        // Create XZ template from ONNX mask (2D from top view)
         function createXZTemplate(templateData) {
             const points = [];
-            const colorData = templateData.savedXZData;
+            const maskData = templateData.maskData;
 
-            if (!colorData) {
+            if (!maskData) {
                 return points;
             }
 
-            const step = 4;
+            const step = 2; // Higher resolution for template
             
             for (let x = 0; x < 128; x += step) {
                 for (let z = 0; z < 128; z += step) {
-                    if (templateData.pointsXZ[x][z]) {
-                        const pixelIndex = (64 * 128 + x) * 4; // Centra Y pozīcija
-                        
-                        const r = colorData.data[pixelIndex];
-                        const g = colorData.data[pixelIndex + 1];
-                        const b = colorData.data[pixelIndex + 2];
-
-                        // XZ plakne - Y ir 0 (centrā)
+                    const pixelIndex = (z * 128 + x) * 4;
+                    
+                    // Use ONNX mask - black pixels are object (0), white is background (255)
+                    if (maskData.data[pixelIndex] === 0) {
+                        // XZ plakne - Y ir 0 (centrā), skalēts uz mazāku izmēru
                         points.push({ 
-                            x: x - 64, 
+                            x: (x - 64) / 2, 
                             y: 0, 
-                            z: z - 64, 
-                            color: { r, g, b } 
+                            z: (z - 64) / 2
                         });
                     }
                 }
@@ -507,7 +495,7 @@
                 return { x, y, z };
             });
 
-            // Filter main cloud based on template - keep points that DON'T match template
+            // Filter main cloud - remove points that match template
             originalPointCloud.forEach(point => {
                 let matchFound = false;
                 
@@ -520,13 +508,13 @@
                     );
                     
                     // If point is close to template point, remove it
-                    if (distance <= 8) { // Fixed threshold for simplicity
+                    if (distance <= 5) {
                         matchFound = true;
                         break;
                     }
                 }
                 
-                // Keep points that don't match template (inverse filter)
+                // Keep points that don't match template
                 if (!matchFound) {
                     filteredPointCloud.push(point);
                 }
@@ -575,7 +563,7 @@
                             const g = Math.floor((gXY + gZY) / 2);
                             const b = Math.floor((bXY + bZY) / 2);
 
-                            commonPoints.push({ x, y, z, color: { r, g, b } });
+                            commonPoints.push({ x: x - 64, y: y - 64, z: z - 64, color: { r, g, b } });
 
                             sumX += x;
                             sumY += y;
@@ -586,25 +574,13 @@
                 }
             }
 
-            if (count > 0) {
-                const avgX = sumX / count;
-                const avgY = sumY / count;
-                const avgZ = sumZ / count;
-
-                for (let i = 0; i < commonPoints.length; i++) {
-                    commonPoints[i].x -= avgX;
-                    commonPoints[i].y -= avgY;
-                    commonPoints[i].z -= avgZ;
-                }
-            }
-
             return commonPoints;
         }
 
         // Reset everything
         resetButton.addEventListener('click', () => {
             mainCloudData = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null };
-            templateData = { pointsXZ: [], savedXZData: null };
+            templateData = { savedXZData: null, maskData: null };
             originalPointCloud = [];
             templatePointCloud = [];
             filteredPointCloud = [];
@@ -686,7 +662,7 @@
                 scene.add(mainCloudObject);
             }
 
-            // Template point cloud (wireframe style)
+            // Template point cloud (red)
             if (templatePointCloud.length > 0) {
                 const geometry2 = createGeometryFromPoints(templatePointCloud);
                 templateMaterial = new THREE.PointsMaterial({ 
@@ -698,7 +674,7 @@
                 scene.add(templateCloudObject);
             }
 
-            // Filtered point cloud (solid)
+            // Filtered point cloud (solid colors)
             if (filteredPointCloud.length > 0) {
                 const geometry3 = createGeometryFromPoints(filteredPointCloud);
                 filteredMaterial = new THREE.PointsMaterial({ 
@@ -756,8 +732,12 @@
 
             points.forEach(point => {
                 const { x, y, z, color } = point;
-                vertices.push(x * 2, -y * 2, z * 2);
-                colors.push(color.r / 255, color.g / 255, color.b / 255);
+                vertices.push(x, -y, z);
+                if (color) {
+                    colors.push(color.r / 255, color.g / 255, color.b / 255);
+                } else {
+                    colors.push(1, 0, 0); // Red for template
+                }
             });
 
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
