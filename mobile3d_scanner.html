@@ -18,6 +18,8 @@
         .filter-controls { background: #e6f7ff; padding: 10px; margin: 5px 0; border-radius: 5px; }
         .slider-group { margin: 5px 0; }
         .rotation-controls { background: #fff3cd; padding: 10px; margin: 5px 0; border-radius: 5px; }
+        .position-controls { background: #e8f5e8; padding: 10px; margin: 5px 0; border-radius: 5px; }
+        .scale-controls { background: #f0e6ff; padding: 10px; margin: 5px 0; border-radius: 5px; }
     </style>
 </head>
 <body>
@@ -85,11 +87,41 @@
                 <input type="range" id="distanceSlider" min="1" max="20" value="8" step="1">
                 <span id="distanceValue">8</span> px
             </div>
+        </div>
+
+        <div class="position-controls">
+            <h3>Filtra pozīcija</h3>
+            <div class="slider-group">
+                <label for="positionXSlider">X ass pozīcija: </label>
+                <input type="range" id="positionXSlider" min="-100" max="100" value="0" step="1">
+                <span id="positionXValue">0</span>
+            </div>
+            
+            <div class="slider-group">
+                <label for="positionZSlider">Z ass pozīcija: </label>
+                <input type="range" id="positionZSlider" min="-100" max="100" value="0" step="1">
+                <span id="positionZValue">0</span>
+            </div>
+        </div>
+
+        <div class="scale-controls">
+            <h3>Filtra mērogošana</h3>
+            <div class="slider-group">
+                <label for="scaleXSlider">X ass mērogs: </label>
+                <input type="range" id="scaleXSlider" min="0.1" max="3.0" value="1.0" step="0.1">
+                <span id="scaleXValue">1.0</span>
+            </div>
+            
+            <div class="slider-group">
+                <label for="scaleZSlider">Z ass mērogs: </label>
+                <input type="range" id="scaleZSlider" min="0.1" max="3.0" value="1.0" step="0.1">
+                <span id="scaleZValue">1.0</span>
+            </div>
 
             <div class="slider-group">
-                <label for="scaleSlider">Filtra mērogs: </label>
-                <input type="range" id="scaleSlider" min="0.5" max="2.0" value="1.0" step="0.1">
-                <span id="scaleValue">1.0</span>
+                <label for="scaleGlobalSlider">Vispārējais mērogs: </label>
+                <input type="range" id="scaleGlobalSlider" min="0.1" max="3.0" value="1.0" step="0.1">
+                <span id="scaleGlobalValue">1.0</span>
             </div>
         </div>
 
@@ -173,8 +205,22 @@
         const heightMaxValue = document.getElementById('heightMaxValue');
         const distanceSlider = document.getElementById('distanceSlider');
         const distanceValue = document.getElementById('distanceValue');
-        const scaleSlider = document.getElementById('scaleSlider');
-        const scaleValue = document.getElementById('scaleValue');
+        
+        // Position controls
+        const positionXSlider = document.getElementById('positionXSlider');
+        const positionXValue = document.getElementById('positionXValue');
+        const positionZSlider = document.getElementById('positionZSlider');
+        const positionZValue = document.getElementById('positionZValue');
+        
+        // Scale controls
+        const scaleXSlider = document.getElementById('scaleXSlider');
+        const scaleXValue = document.getElementById('scaleXValue');
+        const scaleZSlider = document.getElementById('scaleZSlider');
+        const scaleZValue = document.getElementById('scaleZValue');
+        const scaleGlobalSlider = document.getElementById('scaleGlobalSlider');
+        const scaleGlobalValue = document.getElementById('scaleGlobalValue');
+        
+        // Rotation controls
         const rotationXSlider = document.getElementById('rotationXSlider');
         const rotationXValue = document.getElementById('rotationXValue');
         const rotationYSlider = document.getElementById('rotationYSlider');
@@ -206,7 +252,11 @@
             heightMin: -30,
             heightMax: 30,
             distanceThreshold: 8,
-            scale: 1.0,
+            positionX: 0,
+            positionZ: 0,
+            scaleX: 1.0,
+            scaleZ: 1.0,
+            scaleGlobal: 1.0,
             rotationX: 0,
             rotationY: 0,
             rotationZ: 0,
@@ -220,7 +270,11 @@
             heightMinValue.textContent = heightMinSlider.value;
             heightMaxValue.textContent = heightMaxSlider.value;
             distanceValue.textContent = distanceSlider.value;
-            scaleValue.textContent = scaleSlider.value;
+            positionXValue.textContent = positionXSlider.value;
+            positionZValue.textContent = positionZSlider.value;
+            scaleXValue.textContent = scaleXSlider.value;
+            scaleZValue.textContent = scaleZSlider.value;
+            scaleGlobalValue.textContent = scaleGlobalSlider.value;
             rotationXValue.textContent = rotationXSlider.value;
             rotationYValue.textContent = rotationYSlider.value;
             rotationZValue.textContent = rotationZSlider.value;
@@ -250,8 +304,32 @@
             if (filterSettings.autoApply) applyTopFilter();
         });
         
-        scaleSlider.addEventListener('input', () => {
-            filterSettings.scale = parseFloat(scaleSlider.value);
+        positionXSlider.addEventListener('input', () => {
+            filterSettings.positionX = parseInt(positionXSlider.value);
+            updateAllSliders();
+            if (filterSettings.autoApply) applyTopFilter();
+        });
+        
+        positionZSlider.addEventListener('input', () => {
+            filterSettings.positionZ = parseInt(positionZSlider.value);
+            updateAllSliders();
+            if (filterSettings.autoApply) applyTopFilter();
+        });
+        
+        scaleXSlider.addEventListener('input', () => {
+            filterSettings.scaleX = parseFloat(scaleXSlider.value);
+            updateAllSliders();
+            if (filterSettings.autoApply) applyTopFilter();
+        });
+        
+        scaleZSlider.addEventListener('input', () => {
+            filterSettings.scaleZ = parseFloat(scaleZSlider.value);
+            updateAllSliders();
+            if (filterSettings.autoApply) applyTopFilter();
+        });
+        
+        scaleGlobalSlider.addEventListener('input', () => {
+            filterSettings.scaleGlobal = parseFloat(scaleGlobalSlider.value);
             updateAllSliders();
             if (filterSettings.autoApply) applyTopFilter();
         });
@@ -294,7 +372,11 @@
                 heightMin: -30,
                 heightMax: 30,
                 distanceThreshold: 8,
-                scale: 1.0,
+                positionX: 0,
+                positionZ: 0,
+                scaleX: 1.0,
+                scaleZ: 1.0,
+                scaleGlobal: 1.0,
                 rotationX: 0,
                 rotationY: 0,
                 rotationZ: 0,
@@ -305,7 +387,11 @@
             heightMinSlider.value = -30;
             heightMaxSlider.value = 30;
             distanceSlider.value = 8;
-            scaleSlider.value = 1.0;
+            positionXSlider.value = 0;
+            positionZSlider.value = 0;
+            scaleXSlider.value = 1.0;
+            scaleZSlider.value = 1.0;
+            scaleGlobalSlider.value = 1.0;
             rotationXSlider.value = 0;
             rotationYSlider.value = 0;
             rotationZSlider.value = 0;
@@ -528,9 +614,9 @@
                     
                     if (maskData.data[pixelIndex] === 0) {
                         points.push({
-                            x: (x - 64) * filterSettings.scale,
+                            x: (x - 64) * filterSettings.scaleX * filterSettings.scaleGlobal,
                             y: 0,
-                            z: (z - 64) * filterSettings.scale
+                            z: (z - 64) * filterSettings.scaleZ * filterSettings.scaleGlobal
                         });
                     }
                 }
@@ -587,6 +673,10 @@
                     x = newX;
                     y = newY;
                 }
+                
+                // Apply position offset
+                x += filterSettings.positionX;
+                z += filterSettings.positionZ;
                 
                 return { x, y, z };
             });
@@ -851,6 +941,10 @@
                     x = newX;
                     y = newY;
                 }
+                
+                // Apply position offset
+                x += filterSettings.positionX;
+                z += filterSettings.positionZ;
                 
                 vertices.push(x, -y, z);
             });
