@@ -27,8 +27,8 @@
         <div class="capture-area">
             <video id="video1" autoplay width="128" height="128"></video>
             <canvas id="canvasOnnx" width="128" height="128"></canvas>
-            <canvas id="canvas1" width="0" height="0"></canvas>
-            <canvas id="canvas2" width="0" height="0"></canvas>
+            <canvas id="canvas1" width="128" height="128"></canvas>
+            <canvas id="canvas2" width="128" height="128" style="display: none;"></canvas>
         </div>
     </div>
 
@@ -184,10 +184,8 @@
         const autoApplyToggle = document.getElementById('autoApplyToggle');
         const resetFilter = document.getElementById('resetFilter');
         
-        const canvas2 = document.createElement('canvas');
+        const canvas2 = document.getElementById('canvas2');
         const ctx2 = canvas2.getContext('2d');
-        canvas2.width = 128;
-        canvas2.height = 128;
         
         let session;
         let mainCloudData = { 
