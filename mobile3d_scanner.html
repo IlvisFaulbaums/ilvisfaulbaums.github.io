@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Skeneris ar diviem leņķiem</title>
+    <title>3D Skeneris ar template filtru</title>
     <style>
         canvas { border: 1px solid black; }
         #threeContainer { width: 100%; height: 500px; border: 1px solid #ccc; }
@@ -15,11 +15,12 @@
         .capture-area { display: flex; gap: 10px; align-items: center; margin: 10px 0; }
         .point-info { background: #eef; padding: 5px; margin: 5px 0; }
         .view-group { background: #f5f5f5; padding: 10px; margin: 5px 0; border-radius: 5px; }
-        .rotation-controls { background: #ffe6e6; padding: 10px; margin: 5px 0; border-radius: 5px; }
+        .filter-controls { background: #e6f7ff; padding: 10px; margin: 5px 0; border-radius: 5px; }
+        .slider-group { margin: 5px 0; }
     </style>
 </head>
 <body>
-    <h1>3D Skeneris ar diviem leņķiem</h1>
+    <h1>3D Skeneris ar template filtru</h1>
     
     <div class="section">
         <div class="capture-area">
@@ -33,58 +34,69 @@
 
     <div class="section">
         <div class="view-group">
-            <h3>1. Punktu mākonis (90° leņķis)</h3>
+            <h3>1. Galvenais punktu mākonis (XY & ZY)</h3>
             <div class="controls">
                 <button id="xyButton1">XY (0°)</button>
                 <button id="zyButton1">ZY (90°)</button>
-                <button id="generateCloud1">Ģenerēt 1. mākoni</button>
+                <button id="generateCloud1">Ģenerēt galveno mākoni</button>
             </div>
-            <div class="point-info">1. mākonis: <span id="pointCount1">0</span> punkti</div>
+            <div class="point-info">Galvenais mākonis: <span id="pointCount1">0</span> punkti</div>
         </div>
 
         <div class="view-group">
-            <h3>2. Punktu mākonis (45° leņķis)</h3>
+            <h3>2. Template mākonis (no augšas)</h3>
             <div class="controls">
-                <button id="xyButton2">XY (45°)</button>
-                <button id="zyButton2">ZY (135°)</button>
-                <button id="generateCloud2">Ģenerēt 2. mākoni</button>
+                <button id="xyButton2">XY (no augšas)</button>
+                <button id="zyButton2">ZY (no sāniem)</button>
+                <button id="generateCloud2">Ģenerēt template</button>
             </div>
-            <div class="point-info">2. mākonis: <span id="pointCount2">0</span> punkti</div>
+            <div class="point-info">Template mākonis: <span id="pointCount2">0</span> punkti</div>
         </div>
 
         <div class="controls">
-            <button id="combineClouds">Apvienot mākoņus</button>
+            <button id="applyFilter">Lietot filtru</button>
             <button id="resetButton">Sākt no jauna</button>
             <button id="downloadButton">Lejupielādēt</button>
         </div>
         
         <div class="point-info">
-            <strong>Kopā punkti: <span id="totalPoints">0</span></strong>
+            <strong>Filtrētie punkti: <span id="filteredPoints">0</span> / <span id="totalPoints">0</span></strong>
         </div>
     </div>
 
     <div class="section">
-        <div class="rotation-controls">
-            <h3>2. Mākoņa rotācijas kontrole</h3>
-            <div class="controls">
-                <label for="cloud2RotationX">Rotācija ap X asi: </label>
-                <input type="range" id="cloud2RotationX" min="-3.14" max="3.14" value="0" step="0.01">
-                <span id="cloud2RotationXValue">0.00</span> rad
+        <div class="filter-controls">
+            <h3>Template filtra kontrole</h3>
+            <div class="slider-group">
+                <label for="scaleSlider">Template mērogs: </label>
+                <input type="range" id="scaleSlider" min="0.1" max="3" value="1" step="0.1">
+                <span id="scaleValue">1.0</span>
+            </div>
+            <div class="slider-group">
+                <label for="heightSlider">Augstuma filtrs (Y): </label>
+                <input type="range" id="heightSlider" min="0" max="100" value="50" step="1">
+                <span id="heightValue">50</span>%
+            </div>
+            <div class="slider-group">
+                <label for="rotationSlider">Template rotācija: </label>
+                <input type="range" id="rotationSlider" min="0" max="360" value="0" step="1">
+                <span id="rotationValue">0</span>°
+            </div>
+            <div class="slider-group">
+                <label for="thresholdSlider">Atbilstības slieksnis: </label>
+                <input type="range" id="thresholdSlider" min="1" max="20" value="5" step="1">
+                <span id="thresholdValue">5</span> px
             </div>
             <div class="controls">
-                <label for="cloud2RotationZ">Rotācija ap Z asi: </label>
-                <input type="range" id="cloud2RotationZ" min="-3.14" max="3.14" value="0" step="0.01">
-                <span id="cloud2RotationZValue">0.00</span> rad
-            </div>
-            <div class="controls">
-                <button id="resetRotation">Atiestatīt rotāciju</button>
+                <button id="autoApplyToggle">Automātiska filtra lietošana</button>
+                <button id="resetFilter">Atiestatīt filtru</button>
             </div>
         </div>
 
         <div class="controls">
-            <label for="thresholdSlider">Punktu lielums: </label>
-            <input type="range" id="thresholdSlider" min="0.5" max="10" value="3">
-            <span id="thresholdValue">3</span>
+            <label for="pointSizeSlider">Punktu lielums: </label>
+            <input type="range" id="pointSizeSlider" min="0.5" max="10" value="3">
+            <span id="pointSizeValue">3</span>
         </div>
     </div>
 
@@ -103,38 +115,40 @@
         const canvas1 = document.getElementById('canvas1');
         const ctx1 = canvas1.getContext('2d');
         const downloadButton = document.getElementById('downloadButton');
-        const thresholdSlider = document.getElementById('thresholdSlider');
-        const thresholdValue = document.getElementById('thresholdValue');
+        const pointSizeSlider = document.getElementById('pointSizeSlider');
+        const pointSizeValue = document.getElementById('pointSizeValue');
         const threeContainer = document.getElementById('threeContainer');
         const log = document.getElementById('log');
         const finalCanvas = document.getElementById("canvasOnnx");
         const finalCtx = finalCanvas.getContext("2d");
         const resetButton = document.getElementById('resetButton');
         
-        // View 1 buttons
+        // View buttons
         const xyButton1 = document.getElementById('xyButton1');
         const zyButton1 = document.getElementById('zyButton1');
         const generateCloud1 = document.getElementById('generateCloud1');
-        
-        // View 2 buttons
         const xyButton2 = document.getElementById('xyButton2');
         const zyButton2 = document.getElementById('zyButton2');
         const generateCloud2 = document.getElementById('generateCloud2');
-        
-        // Combine button
-        const combineClouds = document.getElementById('combineClouds');
+        const applyFilter = document.getElementById('applyFilter');
         
         // Point counters
         const pointCount1 = document.getElementById('pointCount1');
         const pointCount2 = document.getElementById('pointCount2');
         const totalPoints = document.getElementById('totalPoints');
+        const filteredPoints = document.getElementById('filteredPoints');
         
-        // Rotation controls
-        const cloud2RotationX = document.getElementById('cloud2RotationX');
-        const cloud2RotationXValue = document.getElementById('cloud2RotationXValue');
-        const cloud2RotationZ = document.getElementById('cloud2RotationZ');
-        const cloud2RotationZValue = document.getElementById('cloud2RotationZValue');
-        const resetRotation = document.getElementById('resetRotation');
+        // Filter controls
+        const scaleSlider = document.getElementById('scaleSlider');
+        const scaleValue = document.getElementById('scaleValue');
+        const heightSlider = document.getElementById('heightSlider');
+        const heightValue = document.getElementById('heightValue');
+        const rotationSlider = document.getElementById('rotationSlider');
+        const rotationValue = document.getElementById('rotationValue');
+        const thresholdSlider = document.getElementById('thresholdSlider');
+        const thresholdValue = document.getElementById('thresholdValue');
+        const autoApplyToggle = document.getElementById('autoApplyToggle');
+        const resetFilter = document.getElementById('resetFilter');
         
         const canvas2 = document.getElementById('canvasZY');
         const ctx2 = canvas2.getContext('2d');
@@ -142,49 +156,82 @@
         const ctxZY = canvasZY.getContext('2d');
         
         let session;
-        let view1Data = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null, angle: 90 };
-        let view2Data = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null, angle: 45 };
-        let pointCloud1 = [];
-        let pointCloud2 = [];
-        let combinedPointCloud = [];
-        let scene, camera, renderer, controls, pointCloudGroup, pointCloudObject1, pointCloudObject2, material1, material2;
-        let cloud2RotX = 0;
-        let cloud2RotZ = 0;
+        let view1Data = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null };
+        let view2Data = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null };
+        let originalPointCloud1 = [];
+        let templatePointCloud = [];
+        let filteredPointCloud = [];
+        let scene, camera, renderer, controls;
+        let mainCloudObject, templateCloudObject, filteredCloudObject;
+        let mainMaterial, templateMaterial, filteredMaterial;
+        
+        // Filter settings
+        let filterSettings = {
+            scale: 1.0,
+            heightThreshold: 0.5,
+            rotation: 0,
+            matchThreshold: 5,
+            autoApply: false
+        };
 
         // Update slider displays
+        pointSizeSlider.addEventListener('input', () => {
+            pointSizeValue.textContent = pointSizeSlider.value;
+            if (mainMaterial) mainMaterial.size = parseFloat(pointSizeSlider.value);
+            if (templateMaterial) templateMaterial.size = parseFloat(pointSizeSlider.value);
+            if (filteredMaterial) filteredMaterial.size = parseFloat(pointSizeSlider.value);
+        });
+
+        scaleSlider.addEventListener('input', () => {
+            filterSettings.scale = parseFloat(scaleSlider.value);
+            scaleValue.textContent = filterSettings.scale.toFixed(1);
+            if (filterSettings.autoApply) applyTemplateFilter();
+        });
+
+        heightSlider.addEventListener('input', () => {
+            filterSettings.heightThreshold = parseFloat(heightSlider.value) / 100;
+            heightValue.textContent = heightSlider.value + '%';
+            if (filterSettings.autoApply) applyTemplateFilter();
+        });
+
+        rotationSlider.addEventListener('input', () => {
+            filterSettings.rotation = parseFloat(rotationSlider.value);
+            rotationValue.textContent = filterSettings.rotation + '°';
+            if (filterSettings.autoApply) applyTemplateFilter();
+        });
+
         thresholdSlider.addEventListener('input', () => {
-            thresholdValue.textContent = thresholdSlider.value;
-            if (material1) material1.size = parseFloat(thresholdSlider.value);
-            if (material2) material2.size = parseFloat(thresholdSlider.value);
+            filterSettings.matchThreshold = parseFloat(thresholdSlider.value);
+            thresholdValue.textContent = filterSettings.matchThreshold + ' px';
+            if (filterSettings.autoApply) applyTemplateFilter();
         });
 
-        cloud2RotationX.addEventListener('input', () => {
-            cloud2RotX = parseFloat(cloud2RotationX.value);
-            cloud2RotationXValue.textContent = cloud2RotX.toFixed(2);
-            if (pointCloudObject2) {
-                pointCloudObject2.rotation.x = cloud2RotX;
-            }
+        autoApplyToggle.addEventListener('click', () => {
+            filterSettings.autoApply = !filterSettings.autoApply;
+            autoApplyToggle.textContent = filterSettings.autoApply ? 
+                'Automātiskais filtrs: IESLĒGTS' : 'Automātiskais filtrs: IZSLĒGTS';
+            autoApplyToggle.style.background = filterSettings.autoApply ? '#4CAF50' : '#f44336';
         });
 
-        cloud2RotationZ.addEventListener('input', () => {
-            cloud2RotZ = parseFloat(cloud2RotationZ.value);
-            cloud2RotationZValue.textContent = cloud2RotZ.toFixed(2);
-            if (pointCloudObject2) {
-                pointCloudObject2.rotation.z = cloud2RotZ;
-            }
-        });
-
-        resetRotation.addEventListener('click', () => {
-            cloud2RotX = 0;
-            cloud2RotZ = 0;
-            cloud2RotationX.value = 0;
-            cloud2RotationZ.value = 0;
-            cloud2RotationXValue.textContent = '0.00';
-            cloud2RotationZValue.textContent = '0.00';
-            if (pointCloudObject2) {
-                pointCloudObject2.rotation.x = 0;
-                pointCloudObject2.rotation.z = 0;
-            }
+        resetFilter.addEventListener('click', () => {
+            filterSettings = {
+                scale: 1.0,
+                heightThreshold: 0.5,
+                rotation: 0,
+                matchThreshold: 5,
+                autoApply: false
+            };
+            scaleSlider.value = 1.0;
+            heightSlider.value = 50;
+            rotationSlider.value = 0;
+            thresholdSlider.value = 5;
+            scaleValue.textContent = '1.0';
+            heightValue.textContent = '50%';
+            rotationValue.textContent = '0°';
+            thresholdValue.textContent = '5 px';
+            autoApplyToggle.textContent = 'Automātiskais filtrs: IZSLĒGTS';
+            autoApplyToggle.style.background = '#f44336';
+            applyTemplateFilter();
         });
 
         // ONNX model loading
@@ -201,7 +248,7 @@
             }
         };
 
-        // Background removal function (same as original)
+        // Background removal function
         async function bgRemoval() {
             if (!session) {
                 console.error("ONNX model is not loaded yet.");
@@ -289,7 +336,6 @@
             }
         }
 
-        // Capture and process the frame in real-time
         function processFrame() {
             requestAnimationFrame(processFrame);
             ctx1.drawImage(video1, 0, 0, 128, 128);
@@ -297,43 +343,35 @@
             ctxZY.drawImage(video1, 0, 0, 128, 128);
         }
 
-        // Process XY plane for view 1 (0°)
+        // Process functions
         xyButton1.addEventListener('click', async () => {
-            console.log('bg removal!');
             await bgRemoval();
             view1Data.savedXYData = ctx2.getImageData(0, 0, 128, 128);
             processXY(view1Data);
-            logMessage("1. mākonis: XY attēls (0°) procesēts");
+            logMessage("Galvenais mākonis: XY attēls procesēts");
         });
 
-        // Process ZY plane for view 1 (90°)
         zyButton1.addEventListener('click', async () => {
-            console.log('bg removal!');
             await bgRemoval();
             view1Data.savedZYData = ctx2.getImageData(0, 0, 128, 128);
             processZY(view1Data);
-            logMessage("1. mākonis: ZY attēls (90°) procesēts");
+            logMessage("Galvenais mākonis: ZY attēls procesēts");
         });
 
-        // Process XY plane for view 2 (45°)
         xyButton2.addEventListener('click', async () => {
-            console.log('bg removal!');
             await bgRemoval();
             view2Data.savedXYData = ctx2.getImageData(0, 0, 128, 128);
             processXY(view2Data);
-            logMessage("2. mākonis: XY attēls (45°) procesēts");
+            logMessage("Template: XY attēls (no augšas) procesēts");
         });
 
-        // Process ZY plane for view 2 (135°)
         zyButton2.addEventListener('click', async () => {
-            console.log('bg removal!');
             await bgRemoval();
             view2Data.savedZYData = ctx2.getImageData(0, 0, 128, 128);
             processZY(view2Data);
-            logMessage("2. mākonis: ZY attēls (135°) procesēts");
+            logMessage("Template: ZY attēls (no sāniem) procesēts");
         });
 
-        // Function to process XY plane (same as original)
         function processXY(viewData) {
             const imgData = finalCtx.getImageData(0, 0, 128, 128);
             viewData.pointsXY = new Array(128).fill().map(() => new Array(128).fill(false));
@@ -350,7 +388,6 @@
             }
         }
 
-        // Function to process ZY plane (same as original)
         function processZY(viewData) {
             const imgData = finalCtx.getImageData(0, 0, 128, 128);
             viewData.pointsZY = new Array(128).fill().map(() => new Array(128).fill(false));
@@ -367,36 +404,79 @@
             }
         }
 
-        // Generate point cloud for view 1 (90°)
+        // Generate point clouds
         generateCloud1.addEventListener('click', () => {
-            pointCloud1 = findCommonPoints(view1Data);
-            pointCount1.textContent = pointCloud1.length;
-            logMessage(`1. punktu mākonis izveidots: ${pointCloud1.length} punkti (90° leņķis)`);
+            originalPointCloud1 = findCommonPoints(view1Data);
+            pointCount1.textContent = originalPointCloud1.length;
+            totalPoints.textContent = originalPointCloud1.length;
+            filteredPoints.textContent = originalPointCloud1.length;
+            filteredPointCloud = [...originalPointCloud1];
+            logMessage(`Galvenais mākonis izveidots: ${originalPointCloud1.length} punkti`);
             visualizePointClouds();
         });
 
-        // Generate point cloud for view 2 (45°)
         generateCloud2.addEventListener('click', () => {
-            pointCloud2 = findCommonPoints(view2Data);
-            pointCount2.textContent = pointCloud2.length;
-            logMessage(`2. punktu mākonis izveidots: ${pointCloud2.length} punkti (45° leņķis)`);
+            templatePointCloud = findCommonPoints(view2Data);
+            pointCount2.textContent = templatePointCloud.length;
+            logMessage(`Template mākonis izveidots: ${templatePointCloud.length} punkti`);
             visualizePointClouds();
         });
 
-        // Combine both point clouds
-        combineClouds.addEventListener('click', () => {
-            if (pointCloud1.length === 0 && pointCloud2.length === 0) {
-                logMessage("Vispirms izveidojiet vismaz vienu punktu mākoni");
+        applyFilter.addEventListener('click', () => {
+            applyTemplateFilter();
+        });
+
+        // Template filter function
+        function applyTemplateFilter() {
+            if (originalPointCloud1.length === 0 || templatePointCloud.length === 0) {
+                logMessage("Vispirms izveidojiet galveno mākoni un template");
                 return;
             }
-            
-            combinedPointCloud = [...pointCloud1, ...pointCloud2];
-            totalPoints.textContent = combinedPointCloud.length;
-            logMessage(`Punktu mākoņi apvienoti: ${combinedPointCloud.length} punkti`);
-            visualizePointClouds();
-        });
 
-        // Same as original findCommonPoints function
+            filteredPointCloud = [];
+            const rotationRad = filterSettings.rotation * Math.PI / 180;
+            
+            // Create transformed template points
+            const transformedTemplate = templatePointCloud.map(point => {
+                const x = point.x * Math.cos(rotationRad) - point.z * Math.sin(rotationRad);
+                const z = point.x * Math.sin(rotationRad) + point.z * Math.cos(rotationRad);
+                return {
+                    x: x * filterSettings.scale,
+                    y: point.y * filterSettings.scale,
+                    z: z * filterSettings.scale
+                };
+            });
+
+            // Filter main cloud based on template
+            originalPointCloud1.forEach(point => {
+                let matchFound = false;
+                
+                // Check if point matches any template point within threshold
+                for (const templatePoint of transformedTemplate) {
+                    const distance = Math.sqrt(
+                        Math.pow(point.x - templatePoint.x, 2) +
+                        Math.pow(point.z - templatePoint.z, 2)
+                    );
+                    
+                    // Check height condition (Y axis filtering)
+                    const heightMatch = Math.abs(point.y) <= Math.abs(templatePoint.y) + (filterSettings.heightThreshold * 50);
+                    
+                    if (distance <= filterSettings.matchThreshold && heightMatch) {
+                        matchFound = true;
+                        break;
+                    }
+                }
+                
+                if (matchFound) {
+                    filteredPointCloud.push(point);
+                }
+            });
+
+            filteredPoints.textContent = filteredPointCloud.length;
+            logMessage(`Filtrēti ${filteredPointCloud.length} punkti no ${originalPointCloud1.length}`);
+            updateVisualization();
+        }
+
         function findCommonPoints(viewData) {
             const commonPoints = [];
             const colorDataXY = viewData.savedXYData;
@@ -405,14 +485,11 @@
             const pointsZY = viewData.pointsZY;
 
             if (!colorDataXY || !colorDataZY) {
-                logMessage("Nav datu no XY un ZY attēliem.");
                 return commonPoints;
             }
 
             let sumX = 0, sumY = 0, sumZ = 0, count = 0;
-
-            // Use lower resolution for simpler point cloud
-            const step = 4; // Process every 4th point to reduce density
+            const step = 4;
             
             for (let x = 0; x < 128; x += step) {
                 for (let y = 0; y < 128; y += step) {
@@ -421,7 +498,6 @@
                             const pixelIndexXY = (y * 128 + x) * 4;
                             const pixelIndexZY = (y * 128 + z) * 4;
 
-                            // Get colors from both XY and ZY saved image data
                             const rZY = colorDataXY.data[pixelIndexXY];
                             const gZY = colorDataXY.data[pixelIndexXY + 1];
                             const bZY = colorDataXY.data[pixelIndexXY + 2];
@@ -430,15 +506,12 @@
                             const gXY = colorDataZY.data[pixelIndexZY + 1];
                             const bXY = colorDataZY.data[pixelIndexZY + 2];
 
-                            // Average the colors from XY and ZY planes
                             const r = Math.floor((rXY + rZY) / 2);
                             const g = Math.floor((gXY + gZY) / 2);
                             const b = Math.floor((bXY + bZY) / 2);
 
-                            // Add point to commonPoints
                             commonPoints.push({ x, y, z, color: { r, g, b } });
 
-                            // Sum the coordinates for averaging later
                             sumX += x;
                             sumY += y;
                             sumZ += z;
@@ -448,13 +521,11 @@
                 }
             }
 
-            // Calculate the average coordinates
             if (count > 0) {
                 const avgX = sumX / count;
                 const avgY = sumY / count;
                 const avgZ = sumZ / count;
 
-                // Adjust points to center at (0, 0, 0)
                 for (let i = 0; i < commonPoints.length; i++) {
                     commonPoints[i].x -= avgX;
                     commonPoints[i].y -= avgY;
@@ -467,26 +538,26 @@
 
         // Reset everything
         resetButton.addEventListener('click', () => {
-            view1Data = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null, angle: 90 };
-            view2Data = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null, angle: 45 };
-            pointCloud1 = [];
-            pointCloud2 = [];
-            combinedPointCloud = [];
+            view1Data = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null };
+            view2Data = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null };
+            originalPointCloud1 = [];
+            templatePointCloud = [];
+            filteredPointCloud = [];
             pointCount1.textContent = '0';
             pointCount2.textContent = '0';
             totalPoints.textContent = '0';
+            filteredPoints.textContent = '0';
             threeContainer.innerHTML = '';
+            resetFilter.click();
             logMessage("Visi dati notīrīti. Sāciet no jauna.");
         });
 
-        // Download and visualize the point cloud
+        // Download filtered point cloud
         downloadButton.addEventListener('click', () => {
-            const pointsToUse = combinedPointCloud.length > 0 ? combinedPointCloud : 
-                              pointCloud1.length > 0 ? pointCloud1 : 
-                              pointCloud2.length > 0 ? pointCloud2 : [];
+            const pointsToUse = filteredPointCloud.length > 0 ? filteredPointCloud : originalPointCloud1;
             
             if (pointsToUse.length === 0) {
-                logMessage("Nav punktu, ko lejupielādēt. Vispirms izveidojiet punktu mākoni.");
+                logMessage("Nav punktu, ko lejupielādēt.");
                 return;
             }
 
@@ -494,7 +565,6 @@
         });
 
         function downloadPointCloud(points) {
-            // Start building the PLY header
             let plyData = `ply\n`;
             plyData += `format ascii 1.0\n`;
             plyData += `element vertex ${points.length}\n`;
@@ -506,18 +576,15 @@
             plyData += `property uchar blue\n`;
             plyData += `end_header\n`;
 
-            // Add each point with color
             points.forEach(point => {
                 const { x, y, z, color } = point;
-                // Format each line: x y z r g b
                 plyData += `${x} ${-y} ${z} ${color.r} ${color.g} ${color.b}\n`;
             });
 
-            // Create a Blob and initiate download
             const blob = new Blob([plyData], { type: 'text/plain' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = '3dPunkti.ply';
+            link.download = 'filtrēts_3d_modelis.ply';
             link.click();
 
             logMessage(`Lejupielādēts fails ar ${points.length} punktiem`);
@@ -533,83 +600,59 @@
             renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
             threeContainer.appendChild(renderer.domElement);
 
-            // Add OrbitControls for manual camera control
+            // OrbitControls
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
-            controls.screenSpacePanning = false;
             controls.minDistance = 10;
             controls.maxDistance = 500;
-            controls.maxPolarAngle = Math.PI;
 
-            // Create group for all point clouds
-            pointCloudGroup = new THREE.Group();
-            scene.add(pointCloudGroup);
-
-            // Create first point cloud (90° angle) - FIXED position
-            if (pointCloud1.length > 0) {
-                const geometry1 = new THREE.BufferGeometry();
-                const vertices1 = [];
-                const colors1 = [];
-
-                pointCloud1.forEach(point => {
-                    const { x, y, z, color } = point;
-                    vertices1.push(x * 2, -y * 2, z * 2);
-                    colors1.push(color.r / 255, color.g / 255, color.b / 255);
-                });
-
-                geometry1.setAttribute('position', new THREE.Float32BufferAttribute(vertices1, 3));
-                geometry1.setAttribute('color', new THREE.Float32BufferAttribute(colors1, 3));
-
-                material1 = new THREE.PointsMaterial({ 
+            // Main point cloud (semi-transparent)
+            if (originalPointCloud1.length > 0) {
+                const geometry1 = createGeometryFromPoints(originalPointCloud1);
+                mainMaterial = new THREE.PointsMaterial({ 
                     vertexColors: true, 
-                    size: parseFloat(thresholdSlider.value), 
-                    sizeAttenuation: false 
-                });
-                
-                pointCloudObject1 = new THREE.Points(geometry1, material1);
-                // First cloud stays fixed at center
-                pointCloudObject1.position.set(0, 0, 0);
-                pointCloudGroup.add(pointCloudObject1);
-            }
-
-            // Create second point cloud (45° angle) - Can be rotated around first cloud
-            if (pointCloud2.length > 0) {
-                const geometry2 = new THREE.BufferGeometry();
-                const vertices2 = [];
-                const colors2 = [];
-
-                pointCloud2.forEach(point => {
-                    const { x, y, z, color } = point;
-                    vertices2.push(x * 2, -y * 2, z * 2);
-                    colors2.push(color.r / 255, color.g / 255, color.b / 255);
-                });
-
-                geometry2.setAttribute('position', new THREE.Float32BufferAttribute(vertices2, 3));
-                geometry2.setAttribute('color', new THREE.Float32BufferAttribute(colors2, 3));
-
-                material2 = new THREE.PointsMaterial({ 
-                    vertexColors: true, 
-                    size: parseFloat(thresholdSlider.value), 
+                    size: parseFloat(pointSizeSlider.value),
                     sizeAttenuation: false,
-                    color: 0x8888ff // Slightly different color for second cloud
+                    opacity: 0.3,
+                    transparent: true
                 });
-                
-                pointCloudObject2 = new THREE.Points(geometry2, material2);
-                // Position second cloud slightly offset from first cloud
-                pointCloudObject2.position.set(30, 0, 0);
-                pointCloudGroup.add(pointCloudObject2);
+                mainCloudObject = new THREE.Points(geometry1, mainMaterial);
+                scene.add(mainCloudObject);
             }
 
-            // Add coordinate axes for better orientation
+            // Template point cloud (wireframe style)
+            if (templatePointCloud.length > 0) {
+                const geometry2 = createGeometryFromPoints(templatePointCloud);
+                templateMaterial = new THREE.PointsMaterial({ 
+                    color: 0x00ff00,
+                    size: parseFloat(pointSizeSlider.value) * 1.5,
+                    sizeAttenuation: false
+                });
+                templateCloudObject = new THREE.Points(geometry2, templateMaterial);
+                scene.add(templateCloudObject);
+            }
+
+            // Filtered point cloud (solid)
+            if (filteredPointCloud.length > 0) {
+                const geometry3 = createGeometryFromPoints(filteredPointCloud);
+                filteredMaterial = new THREE.PointsMaterial({ 
+                    vertexColors: true, 
+                    size: parseFloat(pointSizeSlider.value),
+                    sizeAttenuation: false
+                });
+                filteredCloudObject = new THREE.Points(geometry3, filteredMaterial);
+                scene.add(filteredCloudObject);
+            }
+
+            // Add coordinate axes
             const axesHelper = new THREE.AxesHelper(50);
             scene.add(axesHelper);
 
-            // Add grid for reference
+            // Add grid
             const gridHelper = new THREE.GridHelper(100, 20);
             scene.add(gridHelper);
 
-            // Better camera position
             camera.position.set(100, 100, 200);
             camera.lookAt(0, 0, 0);
             controls.update();
@@ -622,8 +665,43 @@
 
             animate();
 
-            const totalPointsCount = pointCloud1.length + pointCloud2.length;
-            logMessage(`Vizualizācija: ${pointCloud1.length} + ${pointCloud2.length} = ${totalPointsCount} punkti. 2. mākonis rotējams ap X un Z asīm.`);
+            logMessage(`Vizualizācija: Galvenais (pelēks), Template (zaļš), Filtrētais (krāsains)`);
+        }
+
+        function updateVisualization() {
+            if (!scene) return;
+
+            // Update filtered cloud
+            if (filteredCloudObject) {
+                scene.remove(filteredCloudObject);
+            }
+
+            if (filteredPointCloud.length > 0) {
+                const geometry3 = createGeometryFromPoints(filteredPointCloud);
+                filteredMaterial = new THREE.PointsMaterial({ 
+                    vertexColors: true, 
+                    size: parseFloat(pointSizeSlider.value),
+                    sizeAttenuation: false
+                });
+                filteredCloudObject = new THREE.Points(geometry3, filteredMaterial);
+                scene.add(filteredCloudObject);
+            }
+        }
+
+        function createGeometryFromPoints(points) {
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const colors = [];
+
+            points.forEach(point => {
+                const { x, y, z, color } = point;
+                vertices.push(x * 2, -y * 2, z * 2);
+                colors.push(color.r / 255, color.g / 255, color.b / 255);
+            });
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            return geometry;
         }
 
         // Start video stream
