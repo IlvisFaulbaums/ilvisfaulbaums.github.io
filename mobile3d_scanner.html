@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Skeneris ar vizualizāciju</title>
+    <title>3D Skeneris ar diviem skata leņķiem</title>
     <style>
         canvas { border: 1px solid black; }
         #threeContainer { width: 100%; height: 500px; border: 1px solid #ccc; }
@@ -17,11 +17,12 @@
         .section { margin: 15px 0; padding: 10px; border: 1px solid #eee; background: white; }
         button { padding: 8px 15px; margin: 2px; cursor: pointer; }
         input[type="range"] { width: 200px; }
-        .color-threshold { background: #eef; padding: 5px; margin: 5px 0; }
+        .view-group { background: #eef; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .view-title { font-weight: bold; margin-bottom: 5px; }
     </style>
 </head>
 <body>
-    <text style="font-size:2em;">3D skeneris ar rotāciju</text>
+    <text style="font-size:2em;">3D skeneris ar diviem skata leņķiem</text>
     
     <div class="section">
         <div class="capture-container">
@@ -31,41 +32,51 @@
             <canvas id="canvas1" width="0" height="0"></canvas>
             <canvas id="canvas2" width="0" height="0"></canvas>
         </div>
-        
-        <div class="controls">
-            <button id="captureButton">Uzņemt attēlu (45°)</button>
-            <button id="resetButton">Sākt no jauna</button>
-            <button id="preview3DButton">Priekšskatīt 3D</button>
-            <div>Uzņemtie attēli: <span id="captureCount">0/5</span></div>
-        </div>
-        
-        <div class="captured-images" id="capturedImages"></div>
     </div>
 
     <div class="section">
-        <div class="control-group">
-            <label for="yOffsetSlider">Y ass korekcija: </label>
-            <input type="range" id="yOffsetSlider" min="-50" max="50" value="0">
-            <span id="yOffsetValue">0</span>
+        <div class="view-group">
+            <div class="view-title">Pirmais skata leņķis: 0° līdz 90° (XY & ZY)</div>
+            <div class="controls">
+                <button id="captureXY1">Uzņemt XY (0°)</button>
+                <button id="captureZY1">Uzņemt ZY (90°)</button>
+                <button id="generateCloud1">Ģenerēt 1. punktu mākoni</button>
+            </div>
+            <div class="captured-images" id="capturedImages1"></div>
         </div>
-        
+
+        <div class="view-group">
+            <div class="view-title">Otrais skata leņķis: 45° līdz 135° (XY & ZY)</div>
+            <div class="controls">
+                <button id="captureXY2">Uzņemt XY (45°)</button>
+                <button id="captureZY2">Uzņemt ZY (135°)</button>
+                <button id="generateCloud2">Ģenerēt 2. punktu mākoni</button>
+            </div>
+            <div class="captured-images" id="capturedImages2"></div>
+        </div>
+
+        <div class="controls">
+            <button id="resetButton">Sākt no jauna</button>
+            <button id="combineClouds">Apvienot punktu mākoņus</button>
+        </div>
+    </div>
+
+    <div class="section">
         <div class="control-group">
             <label for="thresholdSlider">Punktu lielums: </label>
             <input type="range" id="thresholdSlider" min="0.5" max="15" value="5">
             <span id="thresholdValue">5</span>
         </div>
         
-        <div class="color-threshold">
-            <label for="colorThreshold">Krāsu līdzības slieksnis: </label>
-            <input type="range" id="colorThreshold" min="10" max="100" value="30">
-            <span id="colorThresholdValue">30</span>
-            <button id="groupColorsButton">Grupēt līdzīgās krāsas</button>
+        <div class="control-group">
+            <label for="yOffsetSlider">Y ass korekcija: </label>
+            <input type="range" id="yOffsetSlider" min="-50" max="50" value="0">
+            <span id="yOffsetValue">0</span>
         </div>
     </div>
 
     <div class="section">
         <button id="downloadButton">Lejupielādēt & Vizualizēt Punktu Mākoni</button>
-        <button id="optimizeButton">Optimizēt punktu mākoni</button>
     </div>
     
     <!-- Log Section -->
@@ -91,17 +102,24 @@
         const log = document.getElementById('log');
         const finalCanvas = document.getElementById("canvasOnnx");
         const finalCtx = finalCanvas.getContext("2d");
-        const captureButton = document.getElementById('captureButton');
         const resetButton = document.getElementById('resetButton');
-        const preview3DButton = document.getElementById('preview3DButton');
-        const captureCount = document.getElementById('captureCount');
-        const capturedImages = document.getElementById('capturedImages');
         const yOffsetSlider = document.getElementById('yOffsetSlider');
         const yOffsetValue = document.getElementById('yOffsetValue');
-        const colorThreshold = document.getElementById('colorThreshold');
-        const colorThresholdValue = document.getElementById('colorThresholdValue');
-        const groupColorsButton = document.getElementById('groupColorsButton');
-        const optimizeButton = document.getElementById('optimizeButton');
+        
+        // View 1 buttons
+        const captureXY1 = document.getElementById('captureXY1');
+        const captureZY1 = document.getElementById('captureZY1');
+        const generateCloud1 = document.getElementById('generateCloud1');
+        const capturedImages1 = document.getElementById('capturedImages1');
+        
+        // View 2 buttons
+        const captureXY2 = document.getElementById('captureXY2');
+        const captureZY2 = document.getElementById('captureZY2');
+        const generateCloud2 = document.getElementById('generateCloud2');
+        const capturedImages2 = document.getElementById('capturedImages2');
+        
+        // Combine button
+        const combineClouds = document.getElementById('combineClouds');
         
         const canvas2 = document.getElementById('canvasZY');
         const ctx2 = canvas2.getContext('2d');
@@ -109,12 +127,12 @@
         const ctxZY = canvasZY.getContext('2d');
         
         let session;
-        let capturedFrames = [];
-        let currentRotation = 0;
-        let points3D = [];
-        let optimizedPoints = [];
+        let view1Data = { xy: null, zy: null };
+        let view2Data = { xy: null, zy: null };
+        let pointCloud1 = [];
+        let pointCloud2 = [];
+        let combinedPointCloud = [];
         let scene, camera, renderer, pointCloud, material, controls;
-        let isDragging = false;
         let currentYOffset = 0;
 
         // Update slider value displays
@@ -128,10 +146,6 @@
         yOffsetSlider.addEventListener('input', () => {
             yOffsetValue.textContent = yOffsetSlider.value;
             currentYOffset = parseInt(yOffsetSlider.value);
-        });
-
-        colorThreshold.addEventListener('input', () => {
-            colorThresholdValue.textContent = colorThreshold.value;
         });
 
         window.onload = async function() {
@@ -254,15 +268,29 @@
             ctxZY.drawImage(video1, 0, 0, 192, 192);
         }
 
-        // Capture image at current rotation
-        captureButton.addEventListener('click', async () => {
-            if (capturedFrames.length >= 5) {
-                logMessage("Jau uzņemti 5 attēli. Sāciet no jauna vai izveidojiet punktu mākoni.");
-                return;
-            }
+        // Capture functions for View 1 (0° to 90°)
+        captureXY1.addEventListener('click', async () => {
+            logMessage("Uzņemts XY attēls (0°)");
+            await captureImage('xy', 0, capturedImages1, view1Data);
+        });
 
-            logMessage(`Uzņemts attēls ${currentRotation}° rotācijā`);
-            
+        captureZY1.addEventListener('click', async () => {
+            logMessage("Uzņemts ZY attēls (90°)");
+            await captureImage('zy', 90, capturedImages1, view1Data);
+        });
+
+        // Capture functions for View 2 (45° to 135°)
+        captureXY2.addEventListener('click', async () => {
+            logMessage("Uzņemts XY attēls (45°)");
+            await captureImage('xy', 45, capturedImages2, view2Data);
+        });
+
+        captureZY2.addEventListener('click', async () => {
+            logMessage("Uzņemts ZY attēls (135°)");
+            await captureImage('zy', 135, capturedImages2, view2Data);
+        });
+
+        async function captureImage(type, angle, container, dataStore) {
             // Capture current frame
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
@@ -274,16 +302,14 @@
             const maskCanvas = await bgRemoval();
             
             // Store the captured data
-            const frameData = {
-                rotation: currentRotation,
+            dataStore[type] = {
+                angle: angle,
                 colorImage: tempCanvas,
                 maskImage: maskCanvas,
                 colorData: tempCtx.getImageData(0, 0, 192, 192),
                 maskData: maskCanvas ? ctx2.getImageData(0, 0, 192, 192) : null,
                 yOffset: currentYOffset
             };
-            
-            capturedFrames.push(frameData);
             
             // Display thumbnail
             const thumbCanvas = document.createElement('canvas');
@@ -295,271 +321,200 @@
             const img = document.createElement('img');
             img.src = thumbCanvas.toDataURL();
             img.className = 'captured-image';
-            img.title = `${currentRotation}° (Y: ${currentYOffset})`;
-            img.dataset.index = capturedFrames.length - 1;
+            img.title = `${type.toUpperCase()} ${angle}° (Y: ${currentYOffset})`;
+            container.appendChild(img);
             
-            img.addEventListener('click', function() {
-                // Remove active class from all images
-                document.querySelectorAll('.captured-image').forEach(img => img.classList.remove('active'));
-                // Add active class to clicked image
-                this.classList.add('active');
-                // Update Y offset slider to match this frame
-                const index = parseInt(this.dataset.index);
-                yOffsetSlider.value = capturedFrames[index].yOffset;
-                yOffsetValue.textContent = capturedFrames[index].yOffset;
-                currentYOffset = capturedFrames[index].yOffset;
-                logMessage(`Ielādēta ${currentRotation}° attēla Y korekcija: ${currentYOffset}`);
-            });
-            
-            capturedImages.appendChild(img);
-            
-            // Update UI
-            currentRotation += 45;
-            captureCount.textContent = `${capturedFrames.length}/5`;
-            
-            if (capturedFrames.length >= 5) {
-                captureButton.disabled = true;
-                logMessage("Visi 5 attēli uzņemti. Varat priekšskatīt vai izveidot punktu mākoni.");
+            logMessage(`Saglabāts ${type.toUpperCase()} attēls ${angle}° leņķī`);
+        }
+
+        // Generate point cloud for View 1 (0° to 90°)
+        generateCloud1.addEventListener('click', () => {
+            if (!view1Data.xy || !view1Data.zy) {
+                logMessage("Vispirms uzņemiet abus attēlus pirmajam skata leņķim (XY un ZY)");
+                return;
             }
-            
-            // Auto-preview after each capture
-            if (capturedFrames.length > 0) {
-                generatePointCloud();
-                visualizePointCloud();
-            }
+            pointCloud1 = generatePointCloudFromViews(view1Data.xy, view1Data.zy);
+            logMessage(`1. punktu mākonis izveidots: ${pointCloud1.length} punkti`);
+            visualizePointCloud(pointCloud1, "1. punktu mākonis");
         });
 
-        // Reset captured images
-        resetButton.addEventListener('click', () => {
-            capturedFrames = [];
-            currentRotation = 0;
-            capturedImages.innerHTML = '';
-            captureCount.textContent = '0/5';
-            captureButton.disabled = false;
-            points3D = [];
-            optimizedPoints = [];
-            threeContainer.innerHTML = '';
-            logMessage("Uzņemtie attēli notīrīti. Sāciet no jauna.");
+        // Generate point cloud for View 2 (45° to 135°)
+        generateCloud2.addEventListener('click', () => {
+            if (!view2Data.xy || !view2Data.zy) {
+                logMessage("Vispirms uzņemiet abus attēlus otrajam skata leņķim (XY un ZY)");
+                return;
+            }
+            pointCloud2 = generatePointCloudFromViews(view2Data.xy, view2Data.zy);
+            logMessage(`2. punktu mākonis izveidots: ${pointCloud2.length} punkti`);
+            visualizePointCloud(pointCloud2, "2. punktu mākonis");
         });
 
-        // Generate 3D point cloud from captured images
-        function generatePointCloud() {
-            points3D = [];
-            
-            if (capturedFrames.length === 0) {
+        // Combine both point clouds
+        combineClouds.addEventListener('click', () => {
+            if (pointCloud1.length === 0 || pointCloud2.length === 0) {
+                logMessage("Vispirms izveidojiet abus punktu mākoņus");
                 return;
             }
             
-            capturedFrames.forEach((frame, frameIndex) => {
-                const rotation = frame.rotation;
-                const colorData = frame.colorData;
-                const yOffset = frame.yOffset;
+            combinedPointCloud = [...pointCloud1, ...pointCloud2];
+            logMessage(`Punktu mākoņi apvienoti: ${combinedPointCloud.length} punkti`);
+            visualizePointCloud(combinedPointCloud, "Apvienotais punktu mākonis");
+        });
+
+        function generatePointCloudFromViews(xyData, zyData) {
+            const points = [];
+            
+            if (!xyData || !zyData) {
+                return points;
+            }
+
+            const xyColorData = xyData.colorData;
+            const zyColorData = zyData.colorData;
+            const xyAngle = xyData.angle * Math.PI / 180;
+            const zyAngle = zyData.angle * Math.PI / 180;
+            const yOffset = xyData.yOffset;
+
+            // Create temporary canvases for mask processing
+            const xyMaskCanvas = document.createElement('canvas');
+            const xyMaskCtx = xyMaskCanvas.getContext('2d');
+            xyMaskCanvas.width = 192;
+            xyMaskCanvas.height = 192;
+            
+            const zyMaskCanvas = document.createElement('canvas');
+            const zyMaskCtx = zyMaskCanvas.getContext('2d');
+            zyMaskCanvas.width = 192;
+            zyMaskCanvas.height = 192;
+
+            if (xyData.maskImage) {
+                xyMaskCtx.drawImage(xyData.maskImage, 0, 0, 192, 192);
+                const xyMaskData = xyMaskCtx.getImageData(0, 0, 192, 192);
                 
-                const angle = rotation * Math.PI / 180;
-                
-                // Create temporary canvas for mask processing
-                const tempCanvas = document.createElement('canvas');
-                const tempCtx = tempCanvas.getContext('2d');
-                tempCanvas.width = 192;
-                tempCanvas.height = 192;
-                
-                if (frame.maskImage) {
-                    tempCtx.drawImage(frame.maskImage, 0, 0, 192, 192);
-                    const maskData = tempCtx.getImageData(0, 0, 192, 192);
+                if (zyData.maskImage) {
+                    zyMaskCtx.drawImage(zyData.maskImage, 0, 0, 192, 192);
+                    const zyMaskData = zyMaskCtx.getImageData(0, 0, 192, 192);
                     
-                    // Process each pixel in the mask
+                    // Process XY view for X and Y coordinates
+                    const xyPoints = {};
                     for (let y = 0; y < 192; y++) {
                         for (let x = 0; x < 192; x++) {
                             const pixelIndex = (y * 192 + x) * 4;
-                            
-                            // Check if this pixel is part of the object (black in mask)
-                            if (maskData.data[pixelIndex] === 0) {
-                                // Get color from original image
-                                const r = colorData.data[pixelIndex];
-                                const g = colorData.data[pixelIndex + 1];
-                                const b = colorData.data[pixelIndex + 2];
+                            if (xyMaskData.data[pixelIndex] === 0) {
+                                const radius = (x - 96) / 3;
+                                const x3d = radius * Math.cos(xyAngle);
+                                const z3d = radius * Math.sin(xyAngle);
+                                const y3d = ((96 - y) + yOffset) / 3;
                                 
-                                // Convert 2D coordinates to 3D based on rotation
-                                const radius = (x - 96) / 3; // Center and scale
-                                const x3d = radius * Math.cos(angle);
-                                const z3d = radius * Math.sin(angle);
-                                const y3d = ((96 - y) + yOffset) / 3; // Apply Y offset
+                                const key = `${Math.round(x3d)},${Math.round(y3d)}`;
+                                if (!xyPoints[key]) {
+                                    xyPoints[key] = {
+                                        x: x3d, y: y3d, z: z3d,
+                                        color: {
+                                            r: xyColorData.data[pixelIndex],
+                                            g: xyColorData.data[pixelIndex + 1],
+                                            b: xyColorData.data[pixelIndex + 2]
+                                        }
+                                    };
+                                }
+                            }
+                        }
+                    }
+
+                    // Process ZY view for Z and Y coordinates and find common points
+                    for (let y = 0; y < 192; y++) {
+                        for (let z = 0; z < 192; z++) {
+                            const pixelIndex = (y * 192 + z) * 4;
+                            if (zyMaskData.data[pixelIndex] === 0) {
+                                const radius = (z - 96) / 3;
+                                const x3d = radius * Math.cos(zyAngle);
+                                const z3d = radius * Math.sin(zyAngle);
+                                const y3d = ((96 - y) + yOffset) / 3;
                                 
-                                // Only add points that are likely part of the object
-                                if (Math.abs(x3d) < 50 && Math.abs(y3d) < 50 && Math.abs(z3d) < 50) {
-                                    points3D.push({
-                                        x: x3d,
-                                        y: y3d,
-                                        z: z3d,
-                                        color: { r, g, b },
-                                        frame: frameIndex
+                                const key = `${Math.round(x3d)},${Math.round(y3d)}`;
+                                if (xyPoints[key]) {
+                                    // Average the positions and colors
+                                    const xyPoint = xyPoints[key];
+                                    const avgX = (xyPoint.x + x3d) / 2;
+                                    const avgY = (xyPoint.y + y3d) / 2;
+                                    const avgZ = (xyPoint.z + z3d) / 2;
+                                    
+                                    const avgColor = {
+                                        r: Math.round((xyPoint.color.r + zyColorData.data[pixelIndex]) / 2),
+                                        g: Math.round((xyPoint.color.g + zyColorData.data[pixelIndex + 1]) / 2),
+                                        b: Math.round((xyPoint.color.b + zyColorData.data[pixelIndex + 2]) / 2)
+                                    };
+                                    
+                                    points.push({
+                                        x: avgX,
+                                        y: avgY,
+                                        z: avgZ,
+                                        color: avgColor
                                     });
                                 }
                             }
                         }
                     }
                 }
-            });
+            }
             
             // Center the point cloud
-            centerPointCloud();
+            centerPointCloud(points);
             
-            optimizedPoints = [...points3D];
-            
-            logMessage(`Izveidots punktu mākonis ar ${points3D.length} punktiem`);
+            return points;
         }
-        
-        function centerPointCloud() {
-            if (points3D.length === 0) return;
+
+        function centerPointCloud(points) {
+            if (points.length === 0) return;
             
             let sumX = 0, sumY = 0, sumZ = 0;
             
-            points3D.forEach(point => {
+            points.forEach(point => {
                 sumX += point.x;
                 sumY += point.y;
                 sumZ += point.z;
             });
             
-            const avgX = sumX / points3D.length;
-            const avgY = sumY / points3D.length;
-            const avgZ = sumZ / points3D.length;
+            const avgX = sumX / points.length;
+            const avgY = sumY / points.length;
+            const avgZ = sumZ / points.length;
             
-            points3D.forEach(point => {
+            points.forEach(point => {
                 point.x -= avgX;
                 point.y -= avgY;
                 point.z -= avgZ;
             });
         }
 
-        // Group similar colors
-        function groupSimilarColors() {
-            const threshold = parseInt(colorThreshold.value);
-            const colorGroups = {};
-            
-            points3D.forEach(point => {
-                const colorKey = `${Math.round(point.color.r / threshold) * threshold},${Math.round(point.color.g / threshold) * threshold},${Math.round(point.color.b / threshold) * threshold}`;
-                
-                if (!colorGroups[colorKey]) {
-                    colorGroups[colorKey] = {
-                        count: 0,
-                        r: 0, g: 0, b: 0,
-                        points: []
-                    };
-                }
-                
-                colorGroups[colorKey].count++;
-                colorGroups[colorKey].r += point.color.r;
-                colorGroups[colorKey].g += point.color.g;
-                colorGroups[colorKey].b += point.color.b;
-                colorGroups[colorKey].points.push(point);
-            });
-            
-            // Calculate average colors for each group
-            Object.keys(colorGroups).forEach(key => {
-                const group = colorGroups[key];
-                group.r = Math.round(group.r / group.count);
-                group.g = Math.round(group.g / group.count);
-                group.b = Math.round(group.b / group.count);
-                
-                // Apply average color to all points in group
-                group.points.forEach(point => {
-                    point.color.r = group.r;
-                    point.color.g = group.g;
-                    point.color.b = group.b;
-                });
-            });
-            
-            logMessage(`Krāsas sagrupētas: ${Object.keys(colorGroups).length} unikālas krāsas`);
-            return points3D;
-        }
-
-        // Optimize point cloud
-        function optimizePointCloud() {
-            const optimized = [];
-            const gridSize = 2; // Reduce resolution
-            
-            // Simple spatial hashing for optimization
-            const grid = {};
-            
-            points3D.forEach(point => {
-                const gridX = Math.round(point.x / gridSize);
-                const gridY = Math.round(point.y / gridSize);
-                const gridZ = Math.round(point.z / gridSize);
-                const gridKey = `${gridX},${gridY},${gridZ}`;
-                
-                if (!grid[gridKey]) {
-                    grid[gridKey] = {
-                        x: point.x, y: point.y, z: point.z,
-                        r: point.color.r, g: point.color.g, b: point.color.b,
-                        count: 1
-                    };
-                    optimized.push(grid[gridKey]);
-                } else {
-                    // Average the positions and colors
-                    grid[gridKey].x = (grid[gridKey].x * grid[gridKey].count + point.x) / (grid[gridKey].count + 1);
-                    grid[gridKey].y = (grid[gridKey].y * grid[gridKey].count + point.y) / (grid[gridKey].count + 1);
-                    grid[gridKey].z = (grid[gridKey].z * grid[gridKey].count + point.z) / (grid[gridKey].count + 1);
-                    grid[gridKey].r = Math.round((grid[gridKey].r * grid[gridKey].count + point.color.r) / (grid[gridKey].count + 1));
-                    grid[gridKey].g = Math.round((grid[gridKey].g * grid[gridKey].count + point.color.g) / (grid[gridKey].count + 1));
-                    grid[gridKey].b = Math.round((grid[gridKey].b * grid[gridKey].count + point.color.b) / (grid[gridKey].count + 1));
-                    grid[gridKey].count++;
-                }
-            });
-            
-            optimizedPoints = optimized.map(item => ({
-                x: item.x, y: item.y, z: item.z,
-                color: { r: item.r, g: item.g, b: item.b }
-            }));
-            
-            logMessage(`Optimizēts no ${points3D.length} uz ${optimizedPoints.length} punktiem`);
-            return optimizedPoints;
-        }
-
-        // Preview 3D point cloud
-        preview3DButton.addEventListener('click', () => {
-            generatePointCloud();
-            visualizePointCloud();
-        });
-
-        // Group colors button
-        groupColorsButton.addEventListener('click', () => {
-            if (points3D.length === 0) {
-                logMessage("Vispirms izveidojiet punktu mākoni");
-                return;
-            }
-            groupSimilarColors();
-            visualizePointCloud();
-        });
-
-        // Optimize button
-        optimizeButton.addEventListener('click', () => {
-            if (points3D.length === 0) {
-                logMessage("Vispirms izveidojiet punktu mākoni");
-                return;
-            }
-            optimizePointCloud();
-            visualizePointCloud();
+        // Reset everything
+        resetButton.addEventListener('click', () => {
+            view1Data = { xy: null, zy: null };
+            view2Data = { xy: null, zy: null };
+            pointCloud1 = [];
+            pointCloud2 = [];
+            combinedPointCloud = [];
+            capturedImages1.innerHTML = '';
+            capturedImages2.innerHTML = '';
+            threeContainer.innerHTML = '';
+            logMessage("Visi dati notīrīti. Sāciet no jauna.");
         });
 
         // Download and visualize the point cloud
         downloadButton.addEventListener('click', () => {
-            if (points3D.length === 0) {
-                generatePointCloud();
-            }
-            downloadPointCloud();
-        });
-
-        function downloadPointCloud() {
-            const pointsToUse = optimizedPoints.length > 0 ? optimizedPoints : points3D;
+            const pointsToUse = combinedPointCloud.length > 0 ? combinedPointCloud : 
+                              pointCloud1.length > 0 ? pointCloud1 : 
+                              pointCloud2.length > 0 ? pointCloud2 : [];
             
             if (pointsToUse.length === 0) {
-                logMessage("Nav punktu, ko lejupielādēt. Vispirms uzņemiet attēlus.");
+                logMessage("Nav punktu, ko lejupielādēt. Vispirms izveidojiet punktu mākoni.");
                 return;
             }
 
+            downloadPointCloud(pointsToUse);
+        });
+
+        function downloadPointCloud(points) {
             let plyData = `ply\n`;
             plyData += `format ascii 1.0\n`;
-            plyData += `element vertex ${pointsToUse.length}\n`;
+            plyData += `element vertex ${points.length}\n`;
             plyData += `property float x\n`;
             plyData += `property float y\n`;
             plyData += `property float z\n`;
@@ -568,7 +523,7 @@
             plyData += `property uchar blue\n`;
             plyData += `end_header\n`;
 
-            pointsToUse.forEach(point => {
+            points.forEach(point => {
                 const { x, y, z, color } = point;
                 plyData += `${x.toFixed(2)} ${y.toFixed(2)} ${z.toFixed(2)} ${color.r} ${color.g} ${color.b}\n`;
             });
@@ -579,10 +534,10 @@
             link.download = '3dPunkti.ply';
             link.click();
 
-            logMessage(`Lejupielādēts fails ar ${pointsToUse.length} punktiem`);
+            logMessage(`Lejupielādēts fails ar ${points.length} punktiem`);
         }
 
-        function visualizePointCloud() {
+        function visualizePointCloud(points, title = "Punktu mākonis") {
             threeContainer.innerHTML = '';
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x222222);
@@ -601,13 +556,11 @@
             controls.maxDistance = 500;
             controls.maxPolarAngle = Math.PI;
 
-            const pointsToUse = optimizedPoints.length > 0 ? optimizedPoints : points3D;
-            
             const geometry = new THREE.BufferGeometry();
             const vertices = [];
             const colors = [];
 
-            pointsToUse.forEach(point => {
+            points.forEach(point => {
                 const { x, y, z, color } = point;
                 vertices.push(x, y, z);
                 colors.push(color.r / 255, color.g / 255, color.b / 255);
@@ -645,7 +598,7 @@
 
             animate();
 
-            logMessage(`3D priekšskatījums: ${pointsToUse.length} punkti. Varat rotēt ar peles vilkšanu un pietuvināt ar ritentiņu.`);
+            logMessage(`${title}: ${points.length} punkti. Varat rotēt ar peles vilkšanu un pietuvināt ar ritentiņu.`);
         }
 
         // Start video stream
