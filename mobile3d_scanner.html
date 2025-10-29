@@ -6,43 +6,76 @@
     <title>3D Skeneris ar vizualizāciju</title>
     <style>
         canvas { border: 1px solid black; }
-        #threeContainer { width: 100%; height: 400px; }
+        #threeContainer { width: 100%; height: 500px; border: 1px solid #ccc; }
         #log { margin-top: 10px; font-family: Arial, sans-serif; background-color: #f0f0f0; padding: 10px; border: 1px solid #ccc; }
-        .capture-container { margin: 10px 0; }
+        .capture-container { margin: 10px 0; padding: 10px; border: 1px solid #ddd; background: #f9f9f9; }
         .captured-images { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
-        .captured-image { width: 64px; height: 64px; border: 1px solid #ccc; }
+        .captured-image { width: 64px; height: 64px; border: 2px solid transparent; cursor: pointer; }
+        .captured-image.active { border-color: #007bff; }
+        .controls { display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+        .control-group { margin: 5px 0; }
+        .section { margin: 15px 0; padding: 10px; border: 1px solid #eee; background: white; }
+        button { padding: 8px 15px; margin: 2px; cursor: pointer; }
+        input[type="range"] { width: 200px; }
+        .color-threshold { background: #eef; padding: 5px; margin: 5px 0; }
     </style>
 </head>
 <body>
     <text style="font-size:2em;">3D skeneris ar rotāciju</text>
     
-    <div class="capture-container">
-        <video id="video1" autoplay width="128" height="128"></video>
-        <canvas id="canvasZY" width="128" height="128"></canvas>
-        <canvas id="canvasOnnx" width="128" height="128"></canvas>
-        <canvas id="canvas1" width="0" height="0"></canvas>
-        <canvas id="canvas2" width="0" height="0"></canvas>
-    </div>
-    
-    <div class="capture-container">
-        <button id="captureButton">Uzņemt attēlu (45°)</button>
-        <button id="resetButton">Sākt no jauna</button>
-        <div>Uzņemtie attēli: <span id="captureCount">0/5</span></div>
+    <div class="section">
+        <div class="capture-container">
+            <video id="video1" autoplay width="192" height="192"></video>
+            <canvas id="canvasZY" width="192" height="192"></canvas>
+            <canvas id="canvasOnnx" width="192" height="192"></canvas>
+            <canvas id="canvas1" width="0" height="0"></canvas>
+            <canvas id="canvas2" width="0" height="0"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button id="captureButton">Uzņemt attēlu (45°)</button>
+            <button id="resetButton">Sākt no jauna</button>
+            <button id="preview3DButton">Priekšskatīt 3D</button>
+            <div>Uzņemtie attēli: <span id="captureCount">0/5</span></div>
+        </div>
+        
         <div class="captured-images" id="capturedImages"></div>
     </div>
-    
-    <br>
-    <label for="thresholdSlider">Punktu lielums: </label>
-    <input type="range" id="thresholdSlider" min="0.5" max="10" value="5">
-    <br>
-    <button id="downloadButton">Lejupielādēt & Vizualizēt Punktu Mākoni</button>
+
+    <div class="section">
+        <div class="control-group">
+            <label for="yOffsetSlider">Y ass korekcija: </label>
+            <input type="range" id="yOffsetSlider" min="-50" max="50" value="0">
+            <span id="yOffsetValue">0</span>
+        </div>
+        
+        <div class="control-group">
+            <label for="thresholdSlider">Punktu lielums: </label>
+            <input type="range" id="thresholdSlider" min="0.5" max="15" value="5">
+            <span id="thresholdValue">5</span>
+        </div>
+        
+        <div class="color-threshold">
+            <label for="colorThreshold">Krāsu līdzības slieksnis: </label>
+            <input type="range" id="colorThreshold" min="10" max="100" value="30">
+            <span id="colorThresholdValue">30</span>
+            <button id="groupColorsButton">Grupēt līdzīgās krāsas</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <button id="downloadButton">Lejupielādēt & Vizualizēt Punktu Mākoni</button>
+        <button id="optimizeButton">Optimizēt punktu mākoni</button>
+    </div>
     
     <!-- Log Section -->
-    <div id="log">Info:</div>
+    <div id="log">Info: Sagatavojieties uzņemt attēlus...</div>
+    
     <!-- Container for Three.js Visualization -->
     <div id="threeContainer"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.130.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.130.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js" defer></script>
     
@@ -53,14 +86,22 @@
         const ctx1 = canvas1.getContext('2d');
         const downloadButton = document.getElementById('downloadButton');
         const thresholdSlider = document.getElementById('thresholdSlider');
+        const thresholdValue = document.getElementById('thresholdValue');
         const threeContainer = document.getElementById('threeContainer');
         const log = document.getElementById('log');
         const finalCanvas = document.getElementById("canvasOnnx");
         const finalCtx = finalCanvas.getContext("2d");
         const captureButton = document.getElementById('captureButton');
         const resetButton = document.getElementById('resetButton');
+        const preview3DButton = document.getElementById('preview3DButton');
         const captureCount = document.getElementById('captureCount');
         const capturedImages = document.getElementById('capturedImages');
+        const yOffsetSlider = document.getElementById('yOffsetSlider');
+        const yOffsetValue = document.getElementById('yOffsetValue');
+        const colorThreshold = document.getElementById('colorThreshold');
+        const colorThresholdValue = document.getElementById('colorThresholdValue');
+        const groupColorsButton = document.getElementById('groupColorsButton');
+        const optimizeButton = document.getElementById('optimizeButton');
         
         const canvas2 = document.getElementById('canvasZY');
         const ctx2 = canvas2.getContext('2d');
@@ -71,7 +112,27 @@
         let capturedFrames = [];
         let currentRotation = 0;
         let points3D = [];
-        let scene, camera, renderer, pointCloud, material;
+        let optimizedPoints = [];
+        let scene, camera, renderer, pointCloud, material, controls;
+        let isDragging = false;
+        let currentYOffset = 0;
+
+        // Update slider value displays
+        thresholdSlider.addEventListener('input', () => {
+            thresholdValue.textContent = thresholdSlider.value;
+            if (material) {
+                material.size = parseFloat(thresholdSlider.value);
+            }
+        });
+
+        yOffsetSlider.addEventListener('input', () => {
+            yOffsetValue.textContent = yOffsetSlider.value;
+            currentYOffset = parseInt(yOffsetSlider.value);
+        });
+
+        colorThreshold.addEventListener('input', () => {
+            colorThresholdValue.textContent = colorThreshold.value;
+        });
 
         window.onload = async function() {
             try {
@@ -86,35 +147,30 @@
             }
         };
 
-        // Function to invert colors
         async function bgRemoval() {
             if (!session) {
                 console.error("ONNX model is not loaded yet.");
-                return;
+                return null;
             }
 
             const canvas = document.getElementById("canvasZY");
             const ctx = canvas.getContext("2d");
-            const imageData = ctx.getImageData(0, 0, 128, 128);
+            const imageData = ctx.getImageData(0, 0, 192, 192);
 
-            // Create a temporary offscreen canvas for resizing
             const offscreenCanvas = document.createElement('canvas');
             const offscreenCtx = offscreenCanvas.getContext('2d');
-            offscreenCanvas.width = 128;
-            offscreenCanvas.height = 128;
+            offscreenCanvas.width = 192;
+            offscreenCanvas.height = 192;
             offscreenCtx.putImageData(imageData, 0, 0);
             
-            // Create a resized canvas for 128x128
             const resizedCanvas = document.createElement('canvas');
             const resizedCtx = resizedCanvas.getContext('2d');
             resizedCanvas.width = 128;
             resizedCanvas.height = 128;
-            resizedCtx.drawImage(offscreenCanvas, 0, 0, 128, 128, 0, 0, 128, 128);
+            resizedCtx.drawImage(offscreenCanvas, 0, 0, 192, 192, 0, 0, 128, 128);
 
-            // Get 128x128 image data
             const resizedImageData = resizedCtx.getImageData(0, 0, 128, 128).data;
 
-            // Create a Float32Array for the 128x128 image data
             const floatArr = new Float32Array(128 * 128 * 3);
             for (let i = 0, j = 0; i < resizedImageData.length; i += 4, j++) {
                 floatArr[j] = (resizedImageData[i] / 255 - 0.485) / 0.229;
@@ -122,17 +178,12 @@
                 floatArr[j + 32768] = (resizedImageData[i + 2] / 255 - 0.406) / 0.225;
             }
 
-            // Create ONNX tensor with the scaled data
             const inputTensor = new ort.Tensor('float32', floatArr, [1, 3, 128, 128]);
-
-            // Prepare feeds for the model
             const feeds = { "input.1": inputTensor };
 
-            // Run ONNX inference
             const results = await session.run(feeds);
             const pred = Object.values(results)[0];
 
-            // Convert prediction to binary (black and white) with white background
             const intermediateCanvas = document.createElement('canvas');
             const intermediateCtx = intermediateCanvas.getContext('2d');
             intermediateCanvas.width = 128;
@@ -152,10 +203,18 @@
             }
 
             intermediateCtx.putImageData(myImageData, 0, 0);
-            finalCanvas.width = 128;
-            finalCanvas.height = 128;
+            
+            // Scale back to 192x192 for final display
+            const finalCanvasTemp = document.createElement('canvas');
+            const finalCtxTemp = finalCanvasTemp.getContext('2d');
+            finalCanvasTemp.width = 192;
+            finalCanvasTemp.height = 192;
+            finalCtxTemp.drawImage(intermediateCanvas, 0, 0, 128, 128, 0, 0, 192, 192);
+            
+            finalCanvas.width = 192;
+            finalCanvas.height = 192;
             finalCtx.clearRect(0, 0, finalCanvas.width, finalCanvas.height);
-            finalCtx.drawImage(intermediateCanvas, 0, 0, 128, 128, 0, 0, finalCanvas.width, finalCanvas.height);
+            finalCtx.drawImage(finalCanvasTemp, 0, 0);
             
             return intermediateCanvas;
         }
@@ -164,7 +223,6 @@
             return /Mobi|Android|iPhone|iPad|iPod|BlackBerry|Windows Phone/i.test(navigator.userAgent);
         }
 
-        // Log function to display messages
         function logMessage(message) {
             log.textContent = `${message}`;
             log.scrollTop = log.scrollHeight;
@@ -172,7 +230,11 @@
 
         async function startVideoStream() {
             const constraints = {
-                video: isMobile() ? { facingMode: { exact: "environment" } } : true
+                video: { 
+                    width: { ideal: 192 },
+                    height: { ideal: 192 },
+                    ...(isMobile() ? { facingMode: { exact: "environment" } } : {})
+                }
             };
             
             try {
@@ -185,12 +247,11 @@
             }
         }
 
-        // Capture and process the frame in real-time
         function processFrame() {
             requestAnimationFrame(processFrame);
-            ctx1.drawImage(video1, 0, 0, 128, 128);
-            ctx2.drawImage(video1, 0, 0, 128, 128);
-            ctxZY.drawImage(video1, 0, 0, 128, 128);
+            ctx1.drawImage(video1, 0, 0, 192, 192);
+            ctx2.drawImage(video1, 0, 0, 192, 192);
+            ctxZY.drawImage(video1, 0, 0, 192, 192);
         }
 
         // Capture image at current rotation
@@ -205,28 +266,24 @@
             // Capture current frame
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
-            tempCanvas.width = 128;
-            tempCanvas.height = 128;
-            tempCtx.drawImage(video1, 0, 0, 128, 128);
+            tempCanvas.width = 192;
+            tempCanvas.height = 192;
+            tempCtx.drawImage(video1, 0, 0, 192, 192);
             
             // Apply background removal
-            await bgRemoval();
-            
-            // Get the mask from the processed image
-            const maskCanvas = document.createElement('canvas');
-            const maskCtx = maskCanvas.getContext('2d');
-            maskCanvas.width = 128;
-            maskCanvas.height = 128;
-            maskCtx.drawImage(finalCanvas, 0, 0);
+            const maskCanvas = await bgRemoval();
             
             // Store the captured data
-            capturedFrames.push({
+            const frameData = {
                 rotation: currentRotation,
                 colorImage: tempCanvas,
                 maskImage: maskCanvas,
-                colorData: tempCtx.getImageData(0, 0, 128, 128),
-                maskData: maskCtx.getImageData(0, 0, 128, 128)
-            });
+                colorData: tempCtx.getImageData(0, 0, 192, 192),
+                maskData: maskCanvas ? ctx2.getImageData(0, 0, 192, 192) : null,
+                yOffset: currentYOffset
+            };
+            
+            capturedFrames.push(frameData);
             
             // Display thumbnail
             const thumbCanvas = document.createElement('canvas');
@@ -238,7 +295,22 @@
             const img = document.createElement('img');
             img.src = thumbCanvas.toDataURL();
             img.className = 'captured-image';
-            img.title = `${currentRotation}°`;
+            img.title = `${currentRotation}° (Y: ${currentYOffset})`;
+            img.dataset.index = capturedFrames.length - 1;
+            
+            img.addEventListener('click', function() {
+                // Remove active class from all images
+                document.querySelectorAll('.captured-image').forEach(img => img.classList.remove('active'));
+                // Add active class to clicked image
+                this.classList.add('active');
+                // Update Y offset slider to match this frame
+                const index = parseInt(this.dataset.index);
+                yOffsetSlider.value = capturedFrames[index].yOffset;
+                yOffsetValue.textContent = capturedFrames[index].yOffset;
+                currentYOffset = capturedFrames[index].yOffset;
+                logMessage(`Ielādēta ${currentRotation}° attēla Y korekcija: ${currentYOffset}`);
+            });
+            
             capturedImages.appendChild(img);
             
             // Update UI
@@ -247,7 +319,13 @@
             
             if (capturedFrames.length >= 5) {
                 captureButton.disabled = true;
-                logMessage("Visi 5 attēli uzņemti. Varat izveidot punktu mākoni.");
+                logMessage("Visi 5 attēli uzņemti. Varat priekšskatīt vai izveidot punktu mākoni.");
+            }
+            
+            // Auto-preview after each capture
+            if (capturedFrames.length > 0) {
+                generatePointCloud();
+                visualizePointCloud();
             }
         });
 
@@ -258,6 +336,9 @@
             capturedImages.innerHTML = '';
             captureCount.textContent = '0/5';
             captureButton.disabled = false;
+            points3D = [];
+            optimizedPoints = [];
+            threeContainer.innerHTML = '';
             logMessage("Uzņemtie attēli notīrīti. Sāciet no jauna.");
         });
 
@@ -266,44 +347,55 @@
             points3D = [];
             
             if (capturedFrames.length === 0) {
-                logMessage("Nav uzņemtu attēlu. Lūdzu, uzņemiet attēlus vispirms.");
                 return;
             }
             
-            // For each captured frame, extract points based on the mask
             capturedFrames.forEach((frame, frameIndex) => {
                 const rotation = frame.rotation;
                 const colorData = frame.colorData;
-                const maskData = frame.maskData;
+                const yOffset = frame.yOffset;
                 
-                // Convert rotation to radians for 3D coordinates
                 const angle = rotation * Math.PI / 180;
                 
-                // Process each pixel in the mask
-                for (let y = 0; y < 128; y++) {
-                    for (let x = 0; x < 128; x++) {
-                        const pixelIndex = (y * 128 + x) * 4;
-                        
-                        // Check if this pixel is part of the object (black in mask)
-                        if (maskData.data[pixelIndex] === 0) {
-                            // Get color from original image
-                            const r = colorData.data[pixelIndex];
-                            const g = colorData.data[pixelIndex + 1];
-                            const b = colorData.data[pixelIndex + 2];
+                // Create temporary canvas for mask processing
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = 192;
+                tempCanvas.height = 192;
+                
+                if (frame.maskImage) {
+                    tempCtx.drawImage(frame.maskImage, 0, 0, 192, 192);
+                    const maskData = tempCtx.getImageData(0, 0, 192, 192);
+                    
+                    // Process each pixel in the mask
+                    for (let y = 0; y < 192; y++) {
+                        for (let x = 0; x < 192; x++) {
+                            const pixelIndex = (y * 192 + x) * 4;
                             
-                            // Convert 2D coordinates to 3D based on rotation
-                            // X and Z are calculated based on rotation around Y-axis
-                            const radius = (x - 64) / 2; // Center and scale
-                            const x3d = radius * Math.cos(angle);
-                            const z3d = radius * Math.sin(angle);
-                            const y3d = (64 - y) / 2; // Flip Y and scale
-                            
-                            points3D.push({
-                                x: x3d,
-                                y: y3d,
-                                z: z3d,
-                                color: { r, g, b }
-                            });
+                            // Check if this pixel is part of the object (black in mask)
+                            if (maskData.data[pixelIndex] === 0) {
+                                // Get color from original image
+                                const r = colorData.data[pixelIndex];
+                                const g = colorData.data[pixelIndex + 1];
+                                const b = colorData.data[pixelIndex + 2];
+                                
+                                // Convert 2D coordinates to 3D based on rotation
+                                const radius = (x - 96) / 3; // Center and scale
+                                const x3d = radius * Math.cos(angle);
+                                const z3d = radius * Math.sin(angle);
+                                const y3d = ((96 - y) + yOffset) / 3; // Apply Y offset
+                                
+                                // Only add points that are likely part of the object
+                                if (Math.abs(x3d) < 50 && Math.abs(y3d) < 50 && Math.abs(z3d) < 50) {
+                                    points3D.push({
+                                        x: x3d,
+                                        y: y3d,
+                                        z: z3d,
+                                        color: { r, g, b },
+                                        frame: frameIndex
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -311,6 +403,8 @@
             
             // Center the point cloud
             centerPointCloud();
+            
+            optimizedPoints = [...points3D];
             
             logMessage(`Izveidots punktu mākonis ar ${points3D.length} punktiem`);
         }
@@ -330,7 +424,6 @@
             const avgY = sumY / points3D.length;
             const avgZ = sumZ / points3D.length;
             
-            // Adjust points to center at (0, 0, 0)
             points3D.forEach(point => {
                 point.x -= avgX;
                 point.y -= avgY;
@@ -338,22 +431,135 @@
             });
         }
 
+        // Group similar colors
+        function groupSimilarColors() {
+            const threshold = parseInt(colorThreshold.value);
+            const colorGroups = {};
+            
+            points3D.forEach(point => {
+                const colorKey = `${Math.round(point.color.r / threshold) * threshold},${Math.round(point.color.g / threshold) * threshold},${Math.round(point.color.b / threshold) * threshold}`;
+                
+                if (!colorGroups[colorKey]) {
+                    colorGroups[colorKey] = {
+                        count: 0,
+                        r: 0, g: 0, b: 0,
+                        points: []
+                    };
+                }
+                
+                colorGroups[colorKey].count++;
+                colorGroups[colorKey].r += point.color.r;
+                colorGroups[colorKey].g += point.color.g;
+                colorGroups[colorKey].b += point.color.b;
+                colorGroups[colorKey].points.push(point);
+            });
+            
+            // Calculate average colors for each group
+            Object.keys(colorGroups).forEach(key => {
+                const group = colorGroups[key];
+                group.r = Math.round(group.r / group.count);
+                group.g = Math.round(group.g / group.count);
+                group.b = Math.round(group.b / group.count);
+                
+                // Apply average color to all points in group
+                group.points.forEach(point => {
+                    point.color.r = group.r;
+                    point.color.g = group.g;
+                    point.color.b = group.b;
+                });
+            });
+            
+            logMessage(`Krāsas sagrupētas: ${Object.keys(colorGroups).length} unikālas krāsas`);
+            return points3D;
+        }
+
+        // Optimize point cloud
+        function optimizePointCloud() {
+            const optimized = [];
+            const gridSize = 2; // Reduce resolution
+            
+            // Simple spatial hashing for optimization
+            const grid = {};
+            
+            points3D.forEach(point => {
+                const gridX = Math.round(point.x / gridSize);
+                const gridY = Math.round(point.y / gridSize);
+                const gridZ = Math.round(point.z / gridSize);
+                const gridKey = `${gridX},${gridY},${gridZ}`;
+                
+                if (!grid[gridKey]) {
+                    grid[gridKey] = {
+                        x: point.x, y: point.y, z: point.z,
+                        r: point.color.r, g: point.color.g, b: point.color.b,
+                        count: 1
+                    };
+                    optimized.push(grid[gridKey]);
+                } else {
+                    // Average the positions and colors
+                    grid[gridKey].x = (grid[gridKey].x * grid[gridKey].count + point.x) / (grid[gridKey].count + 1);
+                    grid[gridKey].y = (grid[gridKey].y * grid[gridKey].count + point.y) / (grid[gridKey].count + 1);
+                    grid[gridKey].z = (grid[gridKey].z * grid[gridKey].count + point.z) / (grid[gridKey].count + 1);
+                    grid[gridKey].r = Math.round((grid[gridKey].r * grid[gridKey].count + point.color.r) / (grid[gridKey].count + 1));
+                    grid[gridKey].g = Math.round((grid[gridKey].g * grid[gridKey].count + point.color.g) / (grid[gridKey].count + 1));
+                    grid[gridKey].b = Math.round((grid[gridKey].b * grid[gridKey].count + point.color.b) / (grid[gridKey].count + 1));
+                    grid[gridKey].count++;
+                }
+            });
+            
+            optimizedPoints = optimized.map(item => ({
+                x: item.x, y: item.y, z: item.z,
+                color: { r: item.r, g: item.g, b: item.b }
+            }));
+            
+            logMessage(`Optimizēts no ${points3D.length} uz ${optimizedPoints.length} punktiem`);
+            return optimizedPoints;
+        }
+
+        // Preview 3D point cloud
+        preview3DButton.addEventListener('click', () => {
+            generatePointCloud();
+            visualizePointCloud();
+        });
+
+        // Group colors button
+        groupColorsButton.addEventListener('click', () => {
+            if (points3D.length === 0) {
+                logMessage("Vispirms izveidojiet punktu mākoni");
+                return;
+            }
+            groupSimilarColors();
+            visualizePointCloud();
+        });
+
+        // Optimize button
+        optimizeButton.addEventListener('click', () => {
+            if (points3D.length === 0) {
+                logMessage("Vispirms izveidojiet punktu mākoni");
+                return;
+            }
+            optimizePointCloud();
+            visualizePointCloud();
+        });
+
         // Download and visualize the point cloud
         downloadButton.addEventListener('click', () => {
-            generatePointCloud();
+            if (points3D.length === 0) {
+                generatePointCloud();
+            }
             downloadPointCloud();
         });
 
         function downloadPointCloud() {
-            if (points3D.length === 0) {
+            const pointsToUse = optimizedPoints.length > 0 ? optimizedPoints : points3D;
+            
+            if (pointsToUse.length === 0) {
                 logMessage("Nav punktu, ko lejupielādēt. Vispirms uzņemiet attēlus.");
                 return;
             }
 
-            // Start building the PLY header
             let plyData = `ply\n`;
             plyData += `format ascii 1.0\n`;
-            plyData += `element vertex ${points3D.length}\n`;
+            plyData += `element vertex ${pointsToUse.length}\n`;
             plyData += `property float x\n`;
             plyData += `property float y\n`;
             plyData += `property float z\n`;
@@ -362,35 +568,46 @@
             plyData += `property uchar blue\n`;
             plyData += `end_header\n`;
 
-            // Add each point with color
-            points3D.forEach(point => {
+            pointsToUse.forEach(point => {
                 const { x, y, z, color } = point;
-                plyData += `${x} ${y} ${z} ${color.r} ${color.g} ${color.b}\n`;
+                plyData += `${x.toFixed(2)} ${y.toFixed(2)} ${z.toFixed(2)} ${color.r} ${color.g} ${color.b}\n`;
             });
 
-            // Create a Blob and initiate download
             const blob = new Blob([plyData], { type: 'text/plain' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = '3dPunkti.ply';
             link.click();
 
-            visualizePointCloud();
+            logMessage(`Lejupielādēts fails ar ${pointsToUse.length} punktiem`);
         }
 
         function visualizePointCloud() {
             threeContainer.innerHTML = '';
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, threeContainer.clientWidth / threeContainer.clientHeight, 0.1, 1500);
-            renderer = new THREE.WebGLRenderer();
+            scene.background = new THREE.Color(0x222222);
+            
+            camera = new THREE.PerspectiveCamera(75, threeContainer.clientWidth / threeContainer.clientHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
             threeContainer.appendChild(renderer.domElement);
 
+            // Add orbit controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 10;
+            controls.maxDistance = 500;
+            controls.maxPolarAngle = Math.PI;
+
+            const pointsToUse = optimizedPoints.length > 0 ? optimizedPoints : points3D;
+            
             const geometry = new THREE.BufferGeometry();
             const vertices = [];
             const colors = [];
 
-            points3D.forEach(point => {
+            pointsToUse.forEach(point => {
                 const { x, y, z, color } = point;
                 vertices.push(x, y, z);
                 colors.push(color.r / 255, color.g / 255, color.b / 255);
@@ -408,19 +625,27 @@
             pointCloud = new THREE.Points(geometry, material);
             scene.add(pointCloud);
 
-            camera.position.set(0, 0, 500);
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+
+            // Set camera position
+            camera.position.set(0, 0, 100);
+            controls.update();
 
             function animate() {
                 requestAnimationFrame(animate);
-                pointCloud.rotation.y += 0.005;
+                controls.update();
                 renderer.render(scene, camera);
             }
 
             animate();
 
-            thresholdSlider.addEventListener('input', () => {
-                material.size = parseFloat(thresholdSlider.value);
-            });
+            logMessage(`3D priekšskatījums: ${pointsToUse.length} punkti. Varat rotēt ar peles vilkšanu un pietuvināt ar ritentiņu.`);
         }
 
         // Start video stream
