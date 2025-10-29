@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Skeneris ar augšas filtru</title>
+    <title>3D Skeneris ar ONNX fona noņēmēju</title>
     <style>
         canvas { border: 1px solid black; }
         #threeContainer { width: 100%; height: 500px; border: 1px solid #ccc; }
@@ -21,7 +21,7 @@
     </style>
 </head>
 <body>
-    <h1>3D Skeneris ar augšas filtru</h1>
+    <h1>3D Skeneris ar ONNX fona noņēmēju</h1>
     
     <div class="section">
         <div class="capture-area">
@@ -34,17 +34,17 @@
 
     <div class="section">
         <div class="view-group">
-            <h3>Galvenais punktu mākonis (XY & ZY)</h3>
+            <h3>Galvenais punktu mākonis (XY & ZY ar ONNX)</h3>
             <div class="controls">
-                <button id="xyButton">XY attēls</button>
-                <button id="zyButton">ZY attēls</button>
+                <button id="xyButton">XY attēls (ar ONNX)</button>
+                <button id="zyButton">ZY attēls (ar ONNX)</button>
                 <button id="generateMainCloud">Ģenerēt galveno mākoni</button>
             </div>
             <div class="point-info">Galvenais mākonis: <span id="pointCount1">0</span> punkti</div>
         </div>
 
         <div class="view-group">
-            <h3>Augšas filtra attēls</h3>
+            <h3>Augšas filtra attēls (ar ONNX)</h3>
             <div class="controls">
                 <button id="topViewButton">Uzņemt augšas attēlu</button>
                 <button id="generateTopFilter">Ģenerēt filtru</button>
@@ -190,7 +190,11 @@
         canvas2.height = 128;
         
         let session;
-        let mainCloudData = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null };
+        let mainCloudData = { 
+            pointsXY: [], pointsZY: [], 
+            savedXYData: null, savedZYData: null,
+            xyMask: null, zyMask: null 
+        };
         let topFilterData = { maskData: null, savedTopData: null };
         let originalPointCloud = [];
         let filteredPointCloud = [];
@@ -328,8 +332,8 @@
             }
         };
 
-        // Background removal function for top view
-        async function bgRemovalForTopView() {
+        // Background removal function using ONNX
+        async function bgRemoval() {
             if (!session) {
                 console.error("ONNX model is not loaded yet.");
                 return null;
@@ -378,29 +382,10 @@
             finalCtx.clearRect(0, 0, finalCanvas.width, finalCanvas.height);
             finalCtx.drawImage(intermediateCanvas, 0, 0);
 
-            return intermediateCtx.getImageData(0, 0, 128, 128);
-        }
-
-        // Simple threshold for main cloud
-        async function simpleThreshold() {
-            ctx2.drawImage(video1, 0, 0, 128, 128);
-            const imageData = ctx2.getImageData(0, 0, 128, 128);
-            
-            // Simple grayscale threshold
-            for (let i = 0; i < imageData.data.length; i += 4) {
-                const avg = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
-                const value = avg < 128 ? 0 : 255;
-                imageData.data[i] = value;
-                imageData.data[i + 1] = value;
-                imageData.data[i + 2] = value;
-            }
-            
-            finalCanvas.width = 128;
-            finalCanvas.height = 128;
-            finalCtx.clearRect(0, 0, finalCanvas.width, finalCanvas.height);
-            finalCtx.putImageData(imageData, 0, 0);
-            
-            return imageData;
+            return {
+                mask: intermediateCtx.getImageData(0, 0, 128, 128),
+                original: ctx2.getImageData(0, 0, 128, 128)
+            };
         }
 
         function isMobile() {
@@ -432,45 +417,54 @@
             ctx1.drawImage(video1, 0, 0, 128, 128);
         }
 
-        // Process functions
+        // Process functions with ONNX
         xyButton.addEventListener('click', async () => {
-            const imageData = await simpleThreshold();
-            mainCloudData.savedXYData = ctx2.getImageData(0, 0, 128, 128);
-            processXY(imageData);
-            logMessage("Galvenais mākonis: XY attēls procesēts");
+            const result = await bgRemoval();
+            if (result) {
+                mainCloudData.savedXYData = result.original;
+                mainCloudData.xyMask = result.mask;
+                processXY(result.mask);
+                logMessage("Galvenais mākonis: XY attēls procesēts ar ONNX");
+            }
         });
 
         zyButton.addEventListener('click', async () => {
-            const imageData = await simpleThreshold();
-            mainCloudData.savedZYData = ctx2.getImageData(0, 0, 128, 128);
-            processZY(imageData);
-            logMessage("Galvenais mākonis: ZY attēls procesēts");
+            const result = await bgRemoval();
+            if (result) {
+                mainCloudData.savedZYData = result.original;
+                mainCloudData.zyMask = result.mask;
+                processZY(result.mask);
+                logMessage("Galvenais mākonis: ZY attēls procesēts ar ONNX");
+            }
         });
 
         topViewButton.addEventListener('click', async () => {
-            topFilterData.maskData = await bgRemovalForTopView();
-            topFilterData.savedTopData = ctx2.getImageData(0, 0, 128, 128);
-            logMessage("Augšas filtra attēls procesēts ar ONNX");
-            
-            // Calculate filter area
-            let area = 0;
-            if (topFilterData.maskData) {
-                for (let i = 0; i < topFilterData.maskData.data.length; i += 4) {
-                    if (topFilterData.maskData.data[i] === 0) {
-                        area++;
+            const result = await bgRemoval();
+            if (result) {
+                topFilterData.maskData = result.mask;
+                topFilterData.savedTopData = result.original;
+                logMessage("Augšas filtra attēls procesēts ar ONNX");
+                
+                // Calculate filter area
+                let area = 0;
+                if (topFilterData.maskData) {
+                    for (let i = 0; i < topFilterData.maskData.data.length; i += 4) {
+                        if (topFilterData.maskData.data[i] === 0) {
+                            area++;
+                        }
                     }
                 }
+                filterArea.textContent = area;
             }
-            filterArea.textContent = area;
         });
 
-        function processXY(imageData) {
+        function processXY(maskData) {
             mainCloudData.pointsXY = new Array(128).fill().map(() => new Array(128).fill(false));
 
             for (let y = 0; y < 128; y++) {
                 for (let x = 0; x < 128; x++) {
                     const pixelIndex = (y * 128 + x) * 4;
-                    if (imageData.data[pixelIndex] === 0) {
+                    if (maskData.data[pixelIndex] === 0) { // Black pixel = object
                         for (let z = 0; z < 128; z++) {
                             mainCloudData.pointsXY[x][y] = true;
                         }
@@ -479,13 +473,13 @@
             }
         }
 
-        function processZY(imageData) {
+        function processZY(maskData) {
             mainCloudData.pointsZY = new Array(128).fill().map(() => new Array(128).fill(false));
 
             for (let y = 0; y < 128; y++) {
                 for (let z = 0; z < 128; z++) {
                     const pixelIndex = (y * 128 + z) * 4;
-                    if (imageData.data[pixelIndex] === 0) {
+                    if (maskData.data[pixelIndex] === 0) { // Black pixel = object
                         for (let x = 0; x < 128; x++) {
                             mainCloudData.pointsZY[z][y] = true;
                         }
@@ -494,7 +488,7 @@
             }
         }
 
-        // Generate main point cloud from XY and ZY
+        // Generate main point cloud from XY and ZY with ONNX masks
         generateMainCloud.addEventListener('click', () => {
             originalPointCloud = findCommonPoints(mainCloudData);
             pointCount1.textContent = originalPointCloud.length;
@@ -502,7 +496,7 @@
             visiblePoints.textContent = originalPointCloud.length;
             filteredPointCloud = [];
             visiblePointCloud = [...originalPointCloud];
-            logMessage(`Galvenais mākonis izveidots: ${originalPointCloud.length} punkti`);
+            logMessage(`Galvenais mākonis izveidots: ${originalPointCloud.length} punkti (ar ONNX)`);
             visualizePointClouds();
         });
 
@@ -639,7 +633,7 @@
             const pointsXY = mainData.pointsXY;
             const pointsZY = mainData.pointsZY;
 
-            if (!colorDataXY || !colorDataZY) {
+            if (!colorDataXY || !colorDataZY || !pointsXY || !pointsZY) {
                 return commonPoints;
             }
 
@@ -653,14 +647,16 @@
                             const pixelIndexXY = (y * 128 + x) * 4;
                             const pixelIndexZY = (y * 128 + z) * 4;
 
-                            const rZY = colorDataXY.data[pixelIndexXY];
-                            const gZY = colorDataXY.data[pixelIndexXY + 1];
-                            const bZY = colorDataXY.data[pixelIndexXY + 2];
+                            // Get colors from original images (not masks)
+                            const rXY = colorDataXY.data[pixelIndexXY];
+                            const gXY = colorDataXY.data[pixelIndexXY + 1];
+                            const bXY = colorDataXY.data[pixelIndexXY + 2];
 
-                            const rXY = colorDataZY.data[pixelIndexZY];
-                            const gXY = colorDataZY.data[pixelIndexZY + 1];
-                            const bXY = colorDataZY.data[pixelIndexZY + 2];
+                            const rZY = colorDataZY.data[pixelIndexZY];
+                            const gZY = colorDataZY.data[pixelIndexZY + 1];
+                            const bZY = colorDataZY.data[pixelIndexZY + 2];
 
+                            // Average colors from both views
                             const r = Math.floor((rXY + rZY) / 2);
                             const g = Math.floor((gXY + gZY) / 2);
                             const b = Math.floor((bXY + bZY) / 2);
@@ -683,7 +679,11 @@
 
         // Reset everything
         resetButton.addEventListener('click', () => {
-            mainCloudData = { pointsXY: [], pointsZY: [], savedXYData: null, savedZYData: null };
+            mainCloudData = { 
+                pointsXY: [], pointsZY: [], 
+                savedXYData: null, savedZYData: null,
+                xyMask: null, zyMask: null 
+            };
             topFilterData = { maskData: null, savedTopData: null };
             originalPointCloud = [];
             filteredPointCloud = [];
