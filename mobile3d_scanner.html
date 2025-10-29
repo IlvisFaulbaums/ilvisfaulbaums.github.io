@@ -15,6 +15,7 @@
         .capture-area { display: flex; gap: 10px; align-items: center; margin: 10px 0; }
         .point-info { background: #eef; padding: 5px; margin: 5px 0; }
         .view-group { background: #f5f5f5; padding: 10px; margin: 5px 0; border-radius: 5px; }
+        .rotation-controls { background: #ffe6e6; padding: 10px; margin: 5px 0; border-radius: 5px; }
     </style>
 </head>
 <body>
@@ -63,14 +64,32 @@
     </div>
 
     <div class="section">
-        <label for="thresholdSlider">Punktu lielums: </label>
-        <input type="range" id="thresholdSlider" min="0.5" max="10" value="3">
-        <span id="thresholdValue">3</span>
-        
-        <br>
-        <label for="rotationSpeedSlider">Rotācijas ātrums: </label>
-        <input type="range" id="rotationSpeedSlider" min="0" max="0.02" value="0.008" step="0.001">
-        <span id="rotationSpeedValue">0.008</span>
+        <div class="rotation-controls">
+            <h3>Rotācijas kontrole</h3>
+            <div class="controls">
+                <label for="globalRotationSlider">Globālā rotācija (ap Y): </label>
+                <input type="range" id="globalRotationSlider" min="0" max="6.28" value="0" step="0.01">
+                <span id="globalRotationValue">0.00</span> rad
+            </div>
+            <div class="controls">
+                <label for="cloud1RotationSlider">1. mākoņa rotācija (ap Y): </label>
+                <input type="range" id="cloud1RotationSlider" min="0" max="6.28" value="0" step="0.01">
+                <span id="cloud1RotationValue">0.00</span> rad
+            </div>
+            <div class="controls">
+                <label for="autoRotationToggle">Automātiskā rotācija: </label>
+                <input type="checkbox" id="autoRotationToggle" checked>
+                <label for="rotationSpeedSlider">Ātrums: </label>
+                <input type="range" id="rotationSpeedSlider" min="0" max="0.02" value="0.008" step="0.001">
+                <span id="rotationSpeedValue">0.008</span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <label for="thresholdSlider">Punktu lielums: </label>
+            <input type="range" id="thresholdSlider" min="0.5" max="10" value="3">
+            <span id="thresholdValue">3</span>
+        </div>
     </div>
 
     <div id="log">Info: Sagatavojieties uzņemt attēlus...</div>
@@ -115,6 +134,13 @@
         const pointCount2 = document.getElementById('pointCount2');
         const totalPoints = document.getElementById('totalPoints');
         
+        // Rotation controls
+        const globalRotationSlider = document.getElementById('globalRotationSlider');
+        const globalRotationValue = document.getElementById('globalRotationValue');
+        const cloud1RotationSlider = document.getElementById('cloud1RotationSlider');
+        const cloud1RotationValue = document.getElementById('cloud1RotationValue');
+        const autoRotationToggle = document.getElementById('autoRotationToggle');
+        
         const canvas2 = document.getElementById('canvasZY');
         const ctx2 = canvas2.getContext('2d');
         const canvasZY = document.getElementById('canvasZY');
@@ -126,20 +152,36 @@
         let pointCloud1 = [];
         let pointCloud2 = [];
         let combinedPointCloud = [];
-        let scene, camera, renderer, pointCloud, material;
+        let scene, camera, renderer, pointCloudGroup, pointCloudObject1, pointCloudObject2, material1, material2;
         let rotationSpeed = 0.008;
+        let globalRotation = 0;
+        let cloud1Rotation = 0;
+        let autoRotation = true;
 
         // Update slider displays
         thresholdSlider.addEventListener('input', () => {
             thresholdValue.textContent = thresholdSlider.value;
-            if (material) {
-                material.size = parseFloat(thresholdSlider.value);
-            }
+            if (material1) material1.size = parseFloat(thresholdSlider.value);
+            if (material2) material2.size = parseFloat(thresholdSlider.value);
         });
 
         rotationSpeedSlider.addEventListener('input', () => {
             rotationSpeed = parseFloat(rotationSpeedSlider.value);
             rotationSpeedValue.textContent = rotationSpeed;
+        });
+
+        globalRotationSlider.addEventListener('input', () => {
+            globalRotation = parseFloat(globalRotationSlider.value);
+            globalRotationValue.textContent = globalRotation.toFixed(2);
+        });
+
+        cloud1RotationSlider.addEventListener('input', () => {
+            cloud1Rotation = parseFloat(cloud1RotationSlider.value);
+            cloud1RotationValue.textContent = cloud1Rotation.toFixed(2);
+        });
+
+        autoRotationToggle.addEventListener('change', () => {
+            autoRotation = autoRotationToggle.checked;
         });
 
         // ONNX model loading
@@ -327,7 +369,7 @@
             pointCloud1 = findCommonPoints(view1Data);
             pointCount1.textContent = pointCloud1.length;
             logMessage(`1. punktu mākonis izveidots: ${pointCloud1.length} punkti (90° leņķis)`);
-            visualizePointCloud(pointCloud1, "1. mākonis (90°)");
+            visualizePointClouds();
         });
 
         // Generate point cloud for view 2 (45°)
@@ -335,7 +377,7 @@
             pointCloud2 = findCommonPoints(view2Data);
             pointCount2.textContent = pointCloud2.length;
             logMessage(`2. punktu mākonis izveidots: ${pointCloud2.length} punkti (45° leņķis)`);
-            visualizePointCloud(pointCloud2, "2. mākonis (45°)");
+            visualizePointClouds();
         });
 
         // Combine both point clouds
@@ -348,7 +390,7 @@
             combinedPointCloud = [...pointCloud1, ...pointCloud2];
             totalPoints.textContent = combinedPointCloud.length;
             logMessage(`Punktu mākoņi apvienoti: ${combinedPointCloud.length} punkti`);
-            visualizePointCloud(combinedPointCloud, "Apvienotais mākonis");
+            visualizePointClouds();
         });
 
         // Same as original findCommonPoints function
@@ -478,7 +520,7 @@
             logMessage(`Lejupielādēts fails ar ${points.length} punktiem`);
         }
 
-        function visualizePointCloud(points, title = "Punktu mākonis") {
+        function visualizePointClouds() {
             threeContainer.innerHTML = '';
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x222222);
@@ -488,32 +530,59 @@
             renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
             threeContainer.appendChild(renderer.domElement);
 
-            const geometry = new THREE.BufferGeometry();
-            const vertices = [];
-            const colors = [];
+            // Create group for all point clouds
+            pointCloudGroup = new THREE.Group();
+            scene.add(pointCloudGroup);
 
-            points.forEach(point => {
-                const { x, y, z, color } = point;
+            // Create first point cloud (90° angle)
+            if (pointCloud1.length > 0) {
+                const geometry1 = new THREE.BufferGeometry();
+                const vertices1 = [];
+                const colors1 = [];
 
-                // Push point vertices with better scaling
-                vertices.push(x * 2, -y * 2, z * 2);
+                pointCloud1.forEach(point => {
+                    const { x, y, z, color } = point;
+                    vertices1.push(x * 2, -y * 2, z * 2);
+                    colors1.push(color.r / 255, color.g / 255, color.b / 255);
+                });
 
-                // Push the RGB color as a normalized value (between 0 and 1)
-                colors.push(color.r / 255, color.g / 255, color.b / 255);
-            });
+                geometry1.setAttribute('position', new THREE.Float32BufferAttribute(vertices1, 3));
+                geometry1.setAttribute('color', new THREE.Float32BufferAttribute(colors1, 3));
 
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                material1 = new THREE.PointsMaterial({ 
+                    vertexColors: true, 
+                    size: parseFloat(thresholdSlider.value), 
+                    sizeAttenuation: false 
+                });
+                
+                pointCloudObject1 = new THREE.Points(geometry1, material1);
+                pointCloudGroup.add(pointCloudObject1);
+            }
 
-            // Initialize material with initial thresholdSlider value
-            material = new THREE.PointsMaterial({ 
-                vertexColors: true, 
-                size: parseFloat(thresholdSlider.value), 
-                sizeAttenuation: false 
-            });
-            
-            pointCloud = new THREE.Points(geometry, material);
-            scene.add(pointCloud);
+            // Create second point cloud (45° angle)
+            if (pointCloud2.length > 0) {
+                const geometry2 = new THREE.BufferGeometry();
+                const vertices2 = [];
+                const colors2 = [];
+
+                pointCloud2.forEach(point => {
+                    const { x, y, z, color } = point;
+                    vertices2.push(x * 2, -y * 2, z * 2);
+                    colors2.push(color.r / 255, color.g / 255, color.b / 255);
+                });
+
+                geometry2.setAttribute('position', new THREE.Float32BufferAttribute(vertices2, 3));
+                geometry2.setAttribute('color', new THREE.Float32BufferAttribute(colors2, 3));
+
+                material2 = new THREE.PointsMaterial({ 
+                    vertexColors: true, 
+                    size: parseFloat(thresholdSlider.value), 
+                    sizeAttenuation: false 
+                });
+                
+                pointCloudObject2 = new THREE.Points(geometry2, material2);
+                pointCloudGroup.add(pointCloudObject2);
+            }
 
             // Add coordinate axes for better orientation
             const axesHelper = new THREE.AxesHelper(50);
@@ -525,13 +594,29 @@
 
             function animate() {
                 requestAnimationFrame(animate);
-                pointCloud.rotation.y += rotationSpeed;
+                
+                // Apply rotations
+                if (autoRotation) {
+                    globalRotation += rotationSpeed;
+                    globalRotationSlider.value = globalRotation % 6.28;
+                    globalRotationValue.textContent = (globalRotation % 6.28).toFixed(2);
+                }
+                
+                // Apply global rotation to entire group
+                pointCloudGroup.rotation.y = globalRotation;
+                
+                // Apply individual rotation to first cloud
+                if (pointCloudObject1) {
+                    pointCloudObject1.rotation.y = cloud1Rotation;
+                }
+                
                 renderer.render(scene, camera);
             }
 
             animate();
 
-            logMessage(`${title} - ${points.length} punkti. Rotē ap Y asi.`);
+            const totalPointsCount = pointCloud1.length + pointCloud2.length;
+            logMessage(`Vizualizācija: ${pointCloud1.length} + ${pointCloud2.length} = ${totalPointsCount} punkti. 1. mākonis rotē atsevišķi.`);
         }
 
         // Start video stream
