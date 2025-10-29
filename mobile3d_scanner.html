@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>3D Skeneris ar vizualizāciju</title>
+<title>3D Skeneris ar vizualizāciju (Optimizēts)</title>
 <style>
     body {
         font-family: Arial, sans-serif;
@@ -108,6 +108,65 @@ const threeContainer = document.getElementById('threeContainer');
 
 function logMessage(msg){ log.textContent = msg; }
 
+// 🧹 CLEANUP FUNCTION
+async function cleanUpMemory() {
+    console.log("🧹 Cleaning up unused data...");
+
+    // Clear all canvas contexts
+    [ctx1, ctx2, finalCtx].forEach(ctx => {
+        if (ctx) ctx.clearRect(0, 0, 128, 128);
+    });
+
+    // Dispose Three.js objects if they exist
+    if (renderer) {
+        if (scene) {
+            scene.traverse(obj => {
+                if (obj.geometry) obj.geometry.dispose();
+                if (obj.material) {
+                    if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+                    else obj.material.dispose();
+                }
+            });
+        }
+        renderer.dispose();
+        renderer.forceContextLoss();
+        renderer.domElement = null;
+        renderer = null;
+    }
+
+    // Clear large data arrays
+    pointsXY = [];
+    pointsZY = [];
+    commonPoints = [];
+    savedXYData = null;
+    savedZYData = null;
+
+    // Revoke object URLs
+    if (window.lastImageURL) {
+        URL.revokeObjectURL(window.lastImageURL);
+        window.lastImageURL = null;
+    }
+
+    // Try releasing ONNX memory
+    if (session) {
+        try { await session.release?.(); } catch {}
+    }
+
+    // Hint GC
+    if (window.gc) window.gc();
+
+    logMessage("Atmiņa attīrīta!");
+}
+
+// Stop camera safely
+function stopVideoStream() {
+    const stream = video1.srcObject;
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        video1.srcObject = null;
+    }
+}
+
 // Mobile check
 function isMobile() {
     return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -168,6 +227,7 @@ async function bgRemoval() {
 }
 
 xyButton.onclick = async () => {
+    await cleanUpMemory();
     await bgRemoval();
     savedXYData = ctx2.getImageData(0, 0, 128, 128);
     processXY();
@@ -175,6 +235,7 @@ xyButton.onclick = async () => {
 };
 
 zyButton.onclick = async () => {
+    await cleanUpMemory();
     await bgRemoval();
     savedZYData = ctx2.getImageData(0, 0, 128, 128);
     processZY();
@@ -225,7 +286,8 @@ function findCommonPoints(){
     commonPoints.forEach(p=>{p.x-=avgX;p.y-=avgY;p.z-=avgZ;});
 }
 
-downloadButton.onclick = () => {
+downloadButton.onclick = async () => {
+    await cleanUpMemory();
     findCommonPoints();
     visualizePointCloud();
     resetButton.style.display = "inline-block";
@@ -266,10 +328,11 @@ function visualizePointCloud(){
     thresholdSlider.oninput = () => { material.size = thresholdSlider.value; };
 }
 
-resetButton.onclick = () => {
-    pointsXY=[]; pointsZY=[]; commonPoints=[];
+resetButton.onclick = async () => {
+    await cleanUpMemory();
+    stopVideoStream();
     threeContainer.innerHTML="";
-    logMessage("Atiestatīts!");
+    logMessage("Atiestatīts un atmiņa attīrīta!");
     resetButton.style.display = "none";
     saveButton.style.display = "none";
 };
@@ -288,4 +351,3 @@ saveButton.onclick = () => {
 </script>
 </body>
 </html>
-s
