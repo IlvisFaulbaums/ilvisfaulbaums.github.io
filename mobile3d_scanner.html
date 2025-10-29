@@ -1,181 +1,584 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>3D Scanner with ONNX Background Removal</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>4-side 3D Scanner (voxel carving)</title>
   <style>
-    canvas { border: 1px solid black; }
-    #threeContainer { width: 100%; height: 400px; }
-    #log { margin-top: 10px; font-family: Arial, sans-serif; background-color: #f0f0f0; padding: 10px; border: 1px solid #ccc; }
-    .camera-controls { margin: 10px 0; }
-    button { margin: 5px; padding: 8px 15px; }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 12px; }
+    #controls { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+    video, canvas { border:1px solid #aaa; image-rendering: pixelated; }
+    #video1 { width:256px; height:256px; background:#000; }
+    .thumb { width:128px; height:128px; }
+    #threeContainer { width:100%; height:480px; margin-top:12px; border:1px solid #ddd; }
+    #log { margin-top:8px; padding:8px; background:#fafafa; border:1px solid #eee; height:80px; overflow:auto; }
+    button { padding:8px 12px; }
+    .warning { color: #d35400; }
   </style>
 </head>
 <body>
-  <h2>3D Scanner with Camera Coordinates (ONNX Background Removal)</h2>
-  
-  <div class="camera-controls">
-    <button id="captureXY">Capture XY</button>
-    <button id="captureZY">Capture ZY</button>
-    <button id="resetScan">Reset Scan</button>
-    <span id="frameCount">Frames: 0</span>
+  <h2>4-side 3D scanner (no up)</h2>
+  <div class="warning">Note: Using simplified version without external dependencies</div>
+
+  <div id="controls">
+    <video id="video1" autoplay playsinline></video>
+
+    <div>
+      <div>Captured thumbnails (front → right → back → left)</div>
+      <div style="display:flex; gap:6px; margin-top:6px;">
+        <canvas id="thumb0" class="thumb" width="128" height="128"></canvas>
+        <canvas id="thumb1" class="thumb" width="128" height="128"></canvas>
+        <canvas id="thumb2" class="thumb" width="128" height="128"></canvas>
+        <canvas id="thumb3" class="thumb" width="128" height="128"></canvas>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <button id="captureButton">Capture Current Side</button>
+      <button id="autoCaptureButton">Capture 4 Sides (manual rotate)</button>
+      <button id="carveButton">Make Point Cloud (carve)</button>
+      <button id="downloadPLY">Download PLY</button>
+      <label>Mask threshold:
+        <input id="maskThresh" type="range" min="0" max="1" step="0.01" value="0.5">
+        <span id="maskVal">0.50</span>
+      </label>
+      <label>voxel resolution:
+        <select id="resSelect">
+          <option value="32">32 (fast)</option>
+          <option value="64" selected>64</option>
+          <option value="96">96</option>
+        </select>
+      </label>
+    </div>
   </div>
 
-  <video id="video1" autoplay width="320" height="240"></video>
-  <canvas id="canvasProcessed" width="320" height="240"></canvas>
-  <canvas id="canvasOnnx" width="320" height="240"></canvas>
+  <!-- hidden canvases used for processing -->
+  <canvas id="proc" width="128" height="128" style="display:none;"></canvas>
+  <canvas id="maskCanvas" width="128" height="128" style="display:none;"></canvas>
 
-  <br>
-  <button id="downloadButton">Download & Visualize Point Cloud</button>
+  <div id="threeContainer">
+    <div id="noThreeJS" style="padding:20px; text-align:center; color:#666;">
+      <p>3D visualization will appear here after carving</p>
+      <p><small>For best results, use a solid color background behind your object</small></p>
+    </div>
+  </div>
 
-  <div id="log">Info: Ready</div>
-  <div id="threeContainer"></div>
-
-  <script src="https://cdn.jsdelivr.net/npm/three@0.130.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js"></script>
+  <div id="log">Info: ready.</div>
 
   <script>
-  const video1 = document.getElementById('video1');
-  const canvasProcessed = document.getElementById('canvasProcessed');
-  const ctxProcessed = canvasProcessed.getContext('2d');
-  const canvasOnnx = document.getElementById('canvasOnnx');
-  const ctxOnnx = canvasOnnx.getContext('2d');
-  const log = document.getElementById('log');
-  const frameCount = document.getElementById('frameCount');
+  // --- Configuration & DOM ---
+  const video = document.getElementById('video1');
+  const proc = document.getElementById('proc'); 
+  const pctx = proc.getContext('2d');
+  const maskCanvas = document.getElementById('maskCanvas'); 
+  const mctx = maskCanvas.getContext('2d');
+  const noThreeJSElement = document.getElementById('noThreeJS');
 
-  const captureXY = document.getElementById('captureXY');
-  const captureZY = document.getElementById('captureZY');
-  const resetScan = document.getElementById('resetScan');
-  const downloadButton = document.getElementById('downloadButton');
+  const thumbs = [0,1,2,3].map(i => {
+    const canvas = document.getElementById('thumb'+i);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#f0f0f0';
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = '#999';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(sideNames[i], 64, 64);
+    return canvas;
+  });
 
-  let session;
-  let savedXY = null;
-  let savedZY = null;
-  let pointCloud = [];
+  const captureButton = document.getElementById('captureButton');
+  const autoCaptureButton = document.getElementById('autoCaptureButton');
+  const carveButton = document.getElementById('carveButton');
+  const downloadPLY = document.getElementById('downloadPLY');
+  const logEl = document.getElementById('log');
+  const maskThresh = document.getElementById('maskThresh');
+  const maskVal = document.getElementById('maskVal');
+  const resSelect = document.getElementById('resSelect');
 
-  function logMessage(msg) {
-    log.textContent = msg;
-    console.log(msg);
+  maskThresh.addEventListener('input', ()=> maskVal.textContent = Number(maskThresh.value).toFixed(2));
+
+  // store 4 captures: each has {color: ImageData, mask: Uint8Array length w*h}
+  let captures = [null,null,null,null];
+  let currentIndex = 0; // which side we will capture next (0..3)
+  const sideNames = ['front','right','back','left'];
+
+  // --- Camera start ---
+  function isMobile(){ 
+    return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent); 
   }
-
-  async function startVideoStream() {
+  
+  async function startCamera(){
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
-      video1.srcObject = stream;
-      drawFrame();
+      // More permissive constraints
+      const constraints = { 
+        video: { 
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: isMobile() ? "environment" : "user"
+        } 
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      log('Camera started. Waiting for video to play...');
+      
+      // Wait for video to be ready
+      await new Promise((resolve) => {
+        video.addEventListener('loadeddata', resolve, { once: true });
+      });
+      
     } catch (e) {
-      logMessage("Camera error: " + e);
+      console.error('Camera error:', e); 
+      log('Camera error: ' + e.message);
+      // Fallback: show message for user
+      alert('Camera access failed. Please ensure you have granted camera permissions and try again.');
     }
   }
 
-  function drawFrame() {
-    if (video1.videoWidth > 0) {
-      ctxProcessed.drawImage(video1, 0, 0, 320, 240);
+  // --- Simple background removal ---
+  function simpleBgRemoval(canvas) {
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    const mask = new Uint8Array(canvas.width * canvas.height);
+    
+    // Get center color as assumed background
+    const centerX = Math.floor(canvas.width / 2);
+    const centerY = Math.floor(canvas.height / 2);
+    const centerIdx = (centerY * canvas.width + centerX) * 4;
+    const centerR = data[centerIdx];
+    const centerG = data[centerIdx + 1];
+    const centerB = data[centerIdx + 2];
+    
+    const threshold = Number(maskThresh.value) * 200 + 30; // Adaptive threshold
+    
+    for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      
+      // Calculate color difference from center (background)
+      const diff = Math.sqrt(
+        Math.pow(r - centerR, 2) + 
+        Math.pow(g - centerG, 2) + 
+        Math.pow(b - centerB, 2)
+      );
+      
+      // If very different from background, mark as foreground
+      mask[j] = diff > threshold ? 1 : 0;
     }
-    requestAnimationFrame(drawFrame);
+    
+    return mask;
   }
 
-  window.onload = async function() {
-    try {
-      session = await ort.InferenceSession.create('./u2netp_128.onnx', { executionProviders: ['wasm'] });
-      logMessage("✅ ONNX model loaded");
-    } catch (err) {
-      logMessage("❌ Failed to load ONNX: " + err.message);
-    }
-  };
-
-  // ONNX Background removal
-  async function bgRemoval(inputCanvas) {
-    const ctx = inputCanvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, 320, 240);
-
-    // Resize for model
-    const tempCanvas = document.createElement('canvas');
-    const tempCtx = tempCanvas.getContext('2d');
-    tempCanvas.width = 128;
-    tempCanvas.height = 128;
-    tempCtx.drawImage(inputCanvas, 0, 0, 320, 240, 0, 0, 128, 128);
-
-    const resized = tempCtx.getImageData(0, 0, 128, 128).data;
-    const input = new Float32Array(1 * 3 * 128 * 128);
-    for (let i = 0, j = 0; i < resized.length; i += 4, j++) {
-      input[j] = (resized[i] / 255 - 0.485) / 0.229;
-      input[j + 128 * 128] = (resized[i + 1] / 255 - 0.456) / 0.224;
-      input[j + 2 * 128 * 128] = (resized[i + 2] / 255 - 0.406) / 0.225;
-    }
-
-    const tensor = new ort.Tensor('float32', input, [1, 3, 128, 128]);
-    const result = await session.run({ 'input.1': tensor });
-    const output = result[Object.keys(result)[0]].data;
-
-    // Convert output to grayscale mask
-    const maskCanvas = document.createElement('canvas');
-    maskCanvas.width = 128;
-    maskCanvas.height = 128;
-    const maskCtx = maskCanvas.getContext('2d');
-    const maskImage = maskCtx.createImageData(128, 128);
-
-    const min = Math.min(...output);
-    const max = Math.max(...output);
-    const threshold = min + (max - min) * 0.5;
-
-    for (let i = 0; i < output.length; i++) {
-      const v = output[i];
-      const color = v > threshold ? 255 : 0;
-      maskImage.data[i * 4] = color;
-      maskImage.data[i * 4 + 1] = color;
-      maskImage.data[i * 4 + 2] = color;
-      maskImage.data[i * 4 + 3] = 255;
-    }
-
-    maskCtx.putImageData(maskImage, 0, 0);
-    return maskCanvas;
+  // --- Capture functions ---
+  function drawToProc() {
+    // Draw video to processing canvas (resize to 128x128)
+    pctx.clearRect(0, 0, proc.width, proc.height);
+    pctx.drawImage(video, 0, 0, proc.width, proc.height);
   }
 
-  // Capture XY or ZY
-  async function captureFrame(label) {
-    try {
-      const snapCanvas = document.createElement('canvas');
-      snapCanvas.width = 320;
-      snapCanvas.height = 240;
-      snapCanvas.getContext('2d').drawImage(video1, 0, 0, 320, 240);
-
-      const mask = await bgRemoval(snapCanvas);
-
-      // Draw on preview canvas
-      ctxOnnx.clearRect(0, 0, 320, 240);
-      ctxOnnx.drawImage(mask, 0, 0, 128, 128, 0, 0, 320, 240);
-
-      if (label === 'XY') savedXY = mask;
-      if (label === 'ZY') savedZY = mask;
-
-      frameCount.textContent = `Frames: ${(savedXY ? 1 : 0) + (savedZY ? 1 : 0)}`;
-      logMessage(`✅ ${label} captured with background removed`);
-    } catch (e) {
-      logMessage("Capture failed: " + e.message);
-    }
-  }
-
-  captureXY.onclick = () => captureFrame('XY');
-  captureZY.onclick = () => captureFrame('ZY');
-
-  resetScan.onclick = () => {
-    savedXY = savedZY = null;
-    frameCount.textContent = "Frames: 0";
-    ctxOnnx.clearRect(0, 0, 320, 240);
-    logMessage("🔄 Reset complete");
-  };
-
-  downloadButton.onclick = () => {
-    if (!savedXY || !savedZY) {
-      logMessage("Need both XY and ZY before generating 3D cloud");
+  async function captureSide(index) {
+    if (!video.videoWidth) {
+      log('Video not ready yet. Please wait.');
       return;
     }
-    logMessage("3D reconstruction placeholder — add point fusion here.");
-  };
+    
+    drawToProc();
+    
+    // Get color data
+    const color = pctx.getImageData(0, 0, proc.width, proc.height);
+    
+    // Get mask using simple background removal
+    const mask = simpleBgRemoval(proc);
+    
+    // Store capture
+    captures[index] = { color, mask };
+    
+    // Update thumbnail
+    const tctx = thumbs[index].getContext('2d');
+    tctx.clearRect(0, 0, 128, 128);
+    tctx.putImageData(color, 0, 0);
+    
+    // Visualize mask overlay (red tint for background)
+    const overlay = tctx.getImageData(0, 0, proc.width, proc.height);
+    for (let i = 0; i < mask.length; i++) {
+      if (mask[i] === 0) { // Background - add red tint
+        const idx = i * 4;
+        overlay.data[idx] = Math.min(255, overlay.data[idx] + 100);
+        overlay.data[idx + 1] = Math.max(0, overlay.data[idx + 1] - 50);
+        overlay.data[idx + 2] = Math.max(0, overlay.data[idx + 2] - 50);
+      }
+    }
+    tctx.putImageData(overlay, 0, 0);
+    
+    log(`Captured ${sideNames[index]} view.`);
+  }
 
-  startVideoStream();
+  // Manual capture button
+  captureButton.addEventListener('click', async () => {
+    await captureSide(currentIndex);
+    currentIndex = (currentIndex + 1) % 4;
+    log(`Ready for ${sideNames[currentIndex]} view. Rotate object 90° and capture.`);
+  });
+
+  // Auto-capture button
+  autoCaptureButton.addEventListener('click', async () => {
+    currentIndex = 0;
+    log('Starting auto-capture sequence...');
+    
+    for (let i = 0; i < 4; i++) {
+      const proceed = confirm(`Position object for ${sideNames[i]} view. Click OK to capture.`);
+      if (!proceed) {
+        log('Auto-capture cancelled.');
+        return;
+      }
+      await captureSide(i);
+      await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause
+    }
+    
+    currentIndex = 0;
+    log('Auto-capture complete!');
+  });
+
+  // --- Voxel carving ---
+  function makeVoxelCarving() {
+    const res = Number(resSelect.value);
+    const size = res;
+    
+    // Check all captures are available
+    for (let i = 0; i < 4; i++) {
+      if (!captures[i]) {
+        log(`Missing capture for ${sideNames[i]} view.`);
+        return null;
+      }
+    }
+    
+    log(`Starting voxel carving with resolution ${res}...`);
+    
+    // Initialize occupancy grid (1 = occupied, 0 = empty)
+    const grid = new Uint8Array(size * size * size);
+    grid.fill(1); // Start with all voxels occupied
+    
+    // Carve from each view
+    for (let view = 0; view < 4; view++) {
+      const { mask } = captures[view];
+      const imgSize = 128; // Our mask size
+      
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          // Map to mask coordinates
+          const maskX = Math.floor(x * imgSize / size);
+          const maskY = Math.floor(y * imgSize / size);
+          const maskIdx = maskY * imgSize + maskX;
+          
+          if (maskIdx >= mask.length) continue;
+          
+          // If this pixel is background, carve along the ray
+          if (mask[maskIdx] === 0) {
+            for (let z = 0; z < size; z++) {
+              let voxelX, voxelY, voxelZ;
+              
+              // Different carving directions for each view
+              switch(view) {
+                case 0: // Front: carve along Z
+                  voxelX = x;
+                  voxelY = y;
+                  voxelZ = z;
+                  break;
+                case 1: // Right: carve along X (backwards)
+                  voxelX = size - 1 - z;
+                  voxelY = y;
+                  voxelZ = x;
+                  break;
+                case 2: // Back: carve along Z (backwards)
+                  voxelX = size - 1 - x;
+                  voxelY = y;
+                  voxelZ = size - 1 - z;
+                  break;
+                case 3: // Left: carve along X
+                  voxelX = z;
+                  voxelY = y;
+                  voxelZ = size - 1 - x;
+                  break;
+              }
+              
+              const voxelIdx = (voxelZ * size * size) + (voxelY * size) + voxelX;
+              if (voxelIdx < grid.length) {
+                grid[voxelIdx] = 0;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Extract points and assign colors
+    const points = [];
+    const scale = 2.0 / size; // Normalize to [-1, 1] range
+    
+    for (let z = 0; z < size; z++) {
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const idx = (z * size * size) + (y * size) + x;
+          if (grid[idx] === 1) { // Occupied voxel
+            // Find color from the first view where this point is foreground
+            let color = [180, 180, 180]; // Default gray
+            
+            // Try each view to find a good color
+            for (let view = 0; view < 4; view++) {
+              let projX, projY;
+              
+              switch(view) {
+                case 0: // Front
+                  projX = x;
+                  projY = y;
+                  break;
+                case 1: // Right  
+                  projX = z;
+                  projY = y;
+                  break;
+                case 2: // Back
+                  projX = size - 1 - x;
+                  projY = y;
+                  break;
+                case 3: // Left
+                  projX = size - 1 - z;
+                  projY = y;
+                  break;
+              }
+              
+              const maskX = Math.floor(projX * 128 / size);
+              const maskY = Math.floor(projY * 128 / size);
+              const maskIdx = maskY * 128 + maskX;
+              
+              if (maskIdx < captures[view].mask.length && 
+                  captures[view].mask[maskIdx] === 1) {
+                // Use color from this view
+                const colorData = captures[view].color.data;
+                const colorIdx = (maskY * 128 + maskX) * 4;
+                color = [
+                  colorData[colorIdx],
+                  colorData[colorIdx + 1], 
+                  colorData[colorIdx + 2]
+                ];
+                break;
+              }
+            }
+            
+            points.push({
+              x: (x - size/2) * scale,
+              y: (y - size/2) * scale, 
+              z: (z - size/2) * scale,
+              color: color
+            });
+          }
+        }
+      }
+    }
+    
+    log(`Carving complete: ${points.length} points generated`);
+    return { points, resolution: size };
+  }
+
+  // --- Simple 3D visualization using Canvas2D ---
+  function visualizePointsCanvas(pointsData) {
+    const container = document.getElementById('threeContainer');
+    container.innerHTML = '<canvas id="pointsCanvas" width="800" height="480"></canvas>';
+    noThreeJSElement.style.display = 'none';
+    
+    const canvas = document.getElementById('pointsCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const points = pointsData.points;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const scale = 100;
+    
+    let rotationX = 0;
+    let rotationY = 0;
+    let isDragging = false;
+    let lastX = 0;
+    let lastY = 0;
+    
+    function projectPoint(point) {
+      // Simple 3D rotation
+      const cosX = Math.cos(rotationX);
+      const sinX = Math.sin(rotationX);
+      const cosY = Math.cos(rotationY);
+      const sinY = Math.sin(rotationY);
+      
+      // Rotate around Y then X
+      let x = point.x * cosY - point.z * sinY;
+      let y = point.y;
+      let z = point.x * sinY + point.z * cosY;
+      
+      // Rotate around X
+      const y2 = y * cosX - z * sinX;
+      const z2 = y * sinX + z * cosX;
+      
+      return {
+        x: centerX + x * scale,
+        y: centerY + y2 * scale,
+        depth: z2 // for simple depth sorting
+      };
+    }
+    
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw grid
+      ctx.strokeStyle = '#eee';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = -2; i <= 2; i++) {
+        ctx.moveTo(centerX + i * 50, 0);
+        ctx.lineTo(centerX + i * 50, canvas.height);
+        ctx.moveTo(0, centerY + i * 50);
+        ctx.lineTo(canvas.width, centerY + i * 50);
+      }
+      ctx.stroke();
+      
+      // Draw axes
+      ctx.strokeStyle = '#f00';
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(centerX + 60, centerY);
+      ctx.stroke();
+      
+      ctx.strokeStyle = '#0f0';
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(centerX, centerY - 60);
+      ctx.stroke();
+      
+      ctx.strokeStyle = '#00f';
+      ctx.beginPath();
+      const zProj = projectPoint({x: 0, y: 0, z: 1});
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(zProj.x, zProj.y);
+      ctx.stroke();
+      
+      // Draw points with simple depth sorting
+      const projected = points.map((point, index) => {
+        const proj = projectPoint(point);
+        return { ...proj, color: point.color, index };
+      });
+      
+      // Sort by depth (farthest first)
+      projected.sort((a, b) => a.depth - b.depth);
+      
+      for (const point of projected) {
+        const size = Math.max(1, 3 - point.depth * 0.5);
+        ctx.fillStyle = `rgb(${point.color[0]}, ${point.color[1]}, ${point.color[2]})`;
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Draw instructions
+      ctx.fillStyle = '#000';
+      ctx.font = '12px Arial';
+      ctx.fillText('Drag to rotate • Red=X, Green=Y, Blue=Z', 10, 20);
+    }
+    
+    // Mouse controls
+    canvas.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+    });
+    
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      
+      const deltaX = e.clientX - lastX;
+      const deltaY = e.clientY - lastY;
+      
+      rotationY += deltaX * 0.01;
+      rotationX += deltaY * 0.01;
+      
+      lastX = e.clientX;
+      lastY = e.clientY;
+      
+      draw();
+    });
+    
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+    
+    draw();
+  }
+
+  // --- PLY export ---
+  function pointsToPLY(points) {
+    let header = `ply
+format ascii 1.0
+element vertex ${points.length}
+property float x
+property float y
+property float z
+property uchar red
+property uchar green
+property uchar blue
+end_header\n`;
+    
+    let body = '';
+    for (let point of points) {
+      body += `${point.x.toFixed(4)} ${point.y.toFixed(4)} ${point.z.toFixed(4)} ${point.color[0]} ${point.color[1]} ${point.color[2]}\n`;
+    }
+    
+    return header + body;
+  }
+
+  // Wire up buttons
+  let currentPointCloud = null;
+  
+  carveButton.addEventListener('click', () => {
+    const result = makeVoxelCarving();
+    if (result) {
+      currentPointCloud = result;
+      visualizePointsCanvas(result);
+    }
+  });
+  
+  downloadPLY.addEventListener('click', () => {
+    if (!currentPointCloud) {
+      log('No point cloud to download. Run carving first.');
+      return;
+    }
+    
+    const plyData = pointsToPLY(currentPointCloud.points);
+    const blob = new Blob([plyData], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '3d_scan.ply';
+    a.click();
+    URL.revokeObjectURL(url);
+    log('PLY file downloaded.');
+  });
+
+  // Utility functions
+  function log(message) {
+    const timestamp = new Date().toLocaleTimeString();
+    logEl.innerHTML = `<div>[${timestamp}] ${message}</div>` + logEl.innerHTML;
+  }
+
+  // Initialize application
+  async function init() {
+    try {
+      await startCamera();
+      log('Application ready! Capture 4 views of your object (front, right, back, left) then run carving.');
+      log('Tip: Use a solid color background for best results.');
+    } catch (error) {
+      console.error('Initialization error:', error);
+      log('Initialization failed: ' + error.message);
+    }
+  }
+
+  // Start the application
+  init();
   </script>
 </body>
 </html>
