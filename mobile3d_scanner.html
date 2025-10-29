@@ -65,23 +65,19 @@
 
     <div class="section">
         <div class="rotation-controls">
-            <h3>Rotācijas kontrole</h3>
+            <h3>2. Mākoņa rotācijas kontrole</h3>
             <div class="controls">
-                <label for="globalRotationSlider">Globālā rotācija (ap Y): </label>
-                <input type="range" id="globalRotationSlider" min="0" max="6.28" value="0" step="0.01">
-                <span id="globalRotationValue">0.00</span> rad
+                <label for="cloud2RotationX">Rotācija ap X asi: </label>
+                <input type="range" id="cloud2RotationX" min="-3.14" max="3.14" value="0" step="0.01">
+                <span id="cloud2RotationXValue">0.00</span> rad
             </div>
             <div class="controls">
-                <label for="cloud1RotationSlider">1. mākoņa rotācija (ap Y): </label>
-                <input type="range" id="cloud1RotationSlider" min="0" max="6.28" value="0" step="0.01">
-                <span id="cloud1RotationValue">0.00</span> rad
+                <label for="cloud2RotationZ">Rotācija ap Z asi: </label>
+                <input type="range" id="cloud2RotationZ" min="-3.14" max="3.14" value="0" step="0.01">
+                <span id="cloud2RotationZValue">0.00</span> rad
             </div>
             <div class="controls">
-                <label for="autoRotationToggle">Automātiskā rotācija: </label>
-                <input type="checkbox" id="autoRotationToggle" checked>
-                <label for="rotationSpeedSlider">Ātrums: </label>
-                <input type="range" id="rotationSpeedSlider" min="0" max="0.02" value="0.008" step="0.001">
-                <span id="rotationSpeedValue">0.008</span>
+                <button id="resetRotation">Atiestatīt rotāciju</button>
             </div>
         </div>
 
@@ -97,6 +93,7 @@
     <div id="threeContainer"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/three@0.130.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.130.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js" defer></script>
     
@@ -108,8 +105,6 @@
         const downloadButton = document.getElementById('downloadButton');
         const thresholdSlider = document.getElementById('thresholdSlider');
         const thresholdValue = document.getElementById('thresholdValue');
-        const rotationSpeedSlider = document.getElementById('rotationSpeedSlider');
-        const rotationSpeedValue = document.getElementById('rotationSpeedValue');
         const threeContainer = document.getElementById('threeContainer');
         const log = document.getElementById('log');
         const finalCanvas = document.getElementById("canvasOnnx");
@@ -135,11 +130,11 @@
         const totalPoints = document.getElementById('totalPoints');
         
         // Rotation controls
-        const globalRotationSlider = document.getElementById('globalRotationSlider');
-        const globalRotationValue = document.getElementById('globalRotationValue');
-        const cloud1RotationSlider = document.getElementById('cloud1RotationSlider');
-        const cloud1RotationValue = document.getElementById('cloud1RotationValue');
-        const autoRotationToggle = document.getElementById('autoRotationToggle');
+        const cloud2RotationX = document.getElementById('cloud2RotationX');
+        const cloud2RotationXValue = document.getElementById('cloud2RotationXValue');
+        const cloud2RotationZ = document.getElementById('cloud2RotationZ');
+        const cloud2RotationZValue = document.getElementById('cloud2RotationZValue');
+        const resetRotation = document.getElementById('resetRotation');
         
         const canvas2 = document.getElementById('canvasZY');
         const ctx2 = canvas2.getContext('2d');
@@ -152,11 +147,9 @@
         let pointCloud1 = [];
         let pointCloud2 = [];
         let combinedPointCloud = [];
-        let scene, camera, renderer, pointCloudGroup, pointCloudObject1, pointCloudObject2, material1, material2;
-        let rotationSpeed = 0.008;
-        let globalRotation = 0;
-        let cloud1Rotation = 0;
-        let autoRotation = true;
+        let scene, camera, renderer, controls, pointCloudGroup, pointCloudObject1, pointCloudObject2, material1, material2;
+        let cloud2RotX = 0;
+        let cloud2RotZ = 0;
 
         // Update slider displays
         thresholdSlider.addEventListener('input', () => {
@@ -165,23 +158,33 @@
             if (material2) material2.size = parseFloat(thresholdSlider.value);
         });
 
-        rotationSpeedSlider.addEventListener('input', () => {
-            rotationSpeed = parseFloat(rotationSpeedSlider.value);
-            rotationSpeedValue.textContent = rotationSpeed;
+        cloud2RotationX.addEventListener('input', () => {
+            cloud2RotX = parseFloat(cloud2RotationX.value);
+            cloud2RotationXValue.textContent = cloud2RotX.toFixed(2);
+            if (pointCloudObject2) {
+                pointCloudObject2.rotation.x = cloud2RotX;
+            }
         });
 
-        globalRotationSlider.addEventListener('input', () => {
-            globalRotation = parseFloat(globalRotationSlider.value);
-            globalRotationValue.textContent = globalRotation.toFixed(2);
+        cloud2RotationZ.addEventListener('input', () => {
+            cloud2RotZ = parseFloat(cloud2RotationZ.value);
+            cloud2RotationZValue.textContent = cloud2RotZ.toFixed(2);
+            if (pointCloudObject2) {
+                pointCloudObject2.rotation.z = cloud2RotZ;
+            }
         });
 
-        cloud1RotationSlider.addEventListener('input', () => {
-            cloud1Rotation = parseFloat(cloud1RotationSlider.value);
-            cloud1RotationValue.textContent = cloud1Rotation.toFixed(2);
-        });
-
-        autoRotationToggle.addEventListener('change', () => {
-            autoRotation = autoRotationToggle.checked;
+        resetRotation.addEventListener('click', () => {
+            cloud2RotX = 0;
+            cloud2RotZ = 0;
+            cloud2RotationX.value = 0;
+            cloud2RotationZ.value = 0;
+            cloud2RotationXValue.textContent = '0.00';
+            cloud2RotationZValue.textContent = '0.00';
+            if (pointCloudObject2) {
+                pointCloudObject2.rotation.x = 0;
+                pointCloudObject2.rotation.z = 0;
+            }
         });
 
         // ONNX model loading
@@ -530,11 +533,20 @@
             renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
             threeContainer.appendChild(renderer.domElement);
 
+            // Add OrbitControls for manual camera control
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 10;
+            controls.maxDistance = 500;
+            controls.maxPolarAngle = Math.PI;
+
             // Create group for all point clouds
             pointCloudGroup = new THREE.Group();
             scene.add(pointCloudGroup);
 
-            // Create first point cloud (90° angle)
+            // Create first point cloud (90° angle) - FIXED position
             if (pointCloud1.length > 0) {
                 const geometry1 = new THREE.BufferGeometry();
                 const vertices1 = [];
@@ -556,10 +568,12 @@
                 });
                 
                 pointCloudObject1 = new THREE.Points(geometry1, material1);
+                // First cloud stays fixed at center
+                pointCloudObject1.position.set(0, 0, 0);
                 pointCloudGroup.add(pointCloudObject1);
             }
 
-            // Create second point cloud (45° angle)
+            // Create second point cloud (45° angle) - Can be rotated around first cloud
             if (pointCloud2.length > 0) {
                 const geometry2 = new THREE.BufferGeometry();
                 const vertices2 = [];
@@ -577,10 +591,13 @@
                 material2 = new THREE.PointsMaterial({ 
                     vertexColors: true, 
                     size: parseFloat(thresholdSlider.value), 
-                    sizeAttenuation: false 
+                    sizeAttenuation: false,
+                    color: 0x8888ff // Slightly different color for second cloud
                 });
                 
                 pointCloudObject2 = new THREE.Points(geometry2, material2);
+                // Position second cloud slightly offset from first cloud
+                pointCloudObject2.position.set(30, 0, 0);
                 pointCloudGroup.add(pointCloudObject2);
             }
 
@@ -588,35 +605,25 @@
             const axesHelper = new THREE.AxesHelper(50);
             scene.add(axesHelper);
 
+            // Add grid for reference
+            const gridHelper = new THREE.GridHelper(100, 20);
+            scene.add(gridHelper);
+
             // Better camera position
             camera.position.set(100, 100, 200);
             camera.lookAt(0, 0, 0);
+            controls.update();
 
             function animate() {
                 requestAnimationFrame(animate);
-                
-                // Apply rotations
-                if (autoRotation) {
-                    globalRotation += rotationSpeed;
-                    globalRotationSlider.value = globalRotation % 6.28;
-                    globalRotationValue.textContent = (globalRotation % 6.28).toFixed(2);
-                }
-                
-                // Apply global rotation to entire group
-                pointCloudGroup.rotation.y = globalRotation;
-                
-                // Apply individual rotation to first cloud
-                if (pointCloudObject1) {
-                    pointCloudObject1.rotation.y = cloud1Rotation;
-                }
-                
+                controls.update();
                 renderer.render(scene, camera);
             }
 
             animate();
 
             const totalPointsCount = pointCloud1.length + pointCloud2.length;
-            logMessage(`Vizualizācija: ${pointCloud1.length} + ${pointCloud2.length} = ${totalPointsCount} punkti. 1. mākonis rotē atsevišķi.`);
+            logMessage(`Vizualizācija: ${pointCloud1.length} + ${pointCloud2.length} = ${totalPointsCount} punkti. 2. mākonis rotējams ap X un Z asīm.`);
         }
 
         // Start video stream
