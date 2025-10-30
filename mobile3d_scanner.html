@@ -7,10 +7,10 @@
     <style>
         canvas { border: 1px solid black; }
         #threeContainer { 
-            width: 60%; 
+            width: 100%; 
             height: 600px; 
-            border: 1px solid #ccc; 
-            margin: 0 auto;
+            border: 1px solid #ccc;
+            position: relative;
         }
         #log { margin-top: 10px; font-family: Arial, sans-serif; background-color: #f0f0f0; padding: 10px; border: 1px solid #ccc; }
         .controls { display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
@@ -26,26 +26,23 @@
         .position-controls { background: #e8f5e8; padding: 10px; margin: 5px 0; border-radius: 5px; }
         .scale-controls { background: #f0e6ff; padding: 10px; margin: 5px 0; border-radius: 5px; }
         
-        /* New layout styles */
-        .main-container {
+        /* New layout for controls around 3D viewer */
+        .main-layout {
             display: flex;
             flex-wrap: wrap;
             gap: 20px;
             margin: 20px 0;
         }
-        .controls-left {
+        .left-controls {
             flex: 1;
             min-width: 300px;
             max-width: 400px;
         }
-        .viewer-center {
+        .center-viewer {
             flex: 2;
             min-width: 500px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
         }
-        .controls-right {
+        .right-controls {
             flex: 1;
             min-width: 300px;
             max-width: 400px;
@@ -62,16 +59,13 @@
             gap: 10px;
             margin: 15px 0;
         }
+        
         @media (max-width: 1200px) {
-            .main-container {
+            .main-layout {
                 flex-direction: column;
             }
-            .controls-left, .viewer-center, .controls-right {
+            .left-controls, .center-viewer, .right-controls {
                 max-width: 100%;
-            }
-            #threeContainer {
-                width: 100%;
-                height: 500px;
             }
         }
     </style>
@@ -88,9 +82,9 @@
         </div>
     </div>
 
-    <div class="main-container">
+    <div class="main-layout">
         <!-- Left controls -->
-        <div class="controls-left">
+        <div class="left-controls">
             <div class="section">
                 <div class="view-group">
                     <h3>Galvenais punktu mākonis (XY & ZY ar ONNX)</h3>
@@ -137,8 +131,8 @@
             </div>
         </div>
 
-        <!-- Center viewer -->
-        <div class="viewer-center">
+        <!-- Center 3D viewer -->
+        <div class="center-viewer">
             <div id="threeContainer"></div>
             
             <div class="action-buttons">
@@ -154,7 +148,7 @@
         </div>
 
         <!-- Right controls -->
-        <div class="controls-right">
+        <div class="right-controls">
             <div class="section">
                 <div class="position-controls">
                     <h3>Filtra pozīcija</h3>
@@ -202,8 +196,8 @@
                     
                     <div class="slider-group">
                         <label for="rotationYSlider">Y ass rotācija: </label>
-                        <input type="range" id="rotationYSlider" min="0" max="360" value="0" step="1">
-                        <span id="rotationYValue">0</span>°
+                        <input type="range" id="rotationYSlider" min="0" max="360" value="270" step="1">
+                        <span id="rotationYValue">270</span>°
                     </div>
                     
                     <div class="slider-group">
@@ -856,4 +850,226 @@
         downloadButton.addEventListener('click', () => {
             const pointsToUse = visiblePointCloud.length > 0 ? visiblePointCloud : originalPointCloud;
             
-            if (pointsToUse.length === 0
+            if (pointsToUse.length === 0) {
+                logMessage("Nav punktu, ko lejupielādēt.");
+                return;
+            }
+
+            downloadPointCloud(pointsToUse);
+        });
+
+        function downloadPointCloud(points) {
+            let plyData = `ply\n`;
+            plyData += `format ascii 1.0\n`;
+            plyData += `element vertex ${points.length}\n`;
+            plyData += `property float x\n`;
+            plyData += `property float y\n`;
+            plyData += `property float z\n`;
+            plyData += `property uchar red\n`;
+            plyData += `property uchar green\n`;
+            plyData += `property uchar blue\n`;
+            plyData += `end_header\n`;
+
+            points.forEach(point => {
+                const { x, y, z, color } = point;
+                plyData += `${x} ${-y} ${z} ${color.r} ${color.g} ${color.b}\n`;
+            });
+
+            const blob = new Blob([plyData], { type: 'text/plain' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = '3d_modelis.ply';
+            link.click();
+
+            logMessage(`Lejupielādēts fails ar ${points.length} punktiem`);
+        }
+
+        function visualizePointClouds() {
+            threeContainer.innerHTML = '';
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+            
+            camera = new THREE.PerspectiveCamera(75, threeContainer.clientWidth / threeContainer.clientHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+            threeContainer.appendChild(renderer.domElement);
+
+            // OrbitControls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 10;
+            controls.maxDistance = 500;
+
+            // Main point cloud (semi-transparent, always show original)
+            if (originalPointCloud.length > 0) {
+                const geometry1 = createGeometryFromPoints(originalPointCloud);
+                mainMaterial = new THREE.PointsMaterial({ 
+                    vertexColors: true, 
+                    size: parseFloat(pointSizeSlider.value),
+                    sizeAttenuation: false,
+                    opacity: 0.2,
+                    transparent: true
+                });
+                mainCloudObject = new THREE.Points(geometry1, mainMaterial);
+                scene.add(mainCloudObject);
+            }
+
+            // Filter visualization (green points)
+            if (topFilterData.maskData && filteredPointCloud.length > 0) {
+                const filterGeometry = createFilterGeometry();
+                filterMaterial = new THREE.PointsMaterial({ 
+                    color: 0x00ff00,
+                    size: parseFloat(pointSizeSlider.value) * 1.2,
+                    sizeAttenuation: false,
+                    opacity: 0.6,
+                    transparent: true
+                });
+                filterObject = new THREE.Points(filterGeometry, filterMaterial);
+                scene.add(filterObject);
+            }
+
+            // Visible point cloud (solid colors)
+            if (visiblePointCloud.length > 0) {
+                const geometry3 = createGeometryFromPoints(visiblePointCloud);
+                visibleMaterial = new THREE.PointsMaterial({ 
+                    vertexColors: true, 
+                    size: parseFloat(pointSizeSlider.value),
+                    sizeAttenuation: false
+                });
+                visibleCloudObject = new THREE.Points(geometry3, visibleMaterial);
+                scene.add(visibleCloudObject);
+            }
+
+            // Add coordinate axes
+            const axesHelper = new THREE.AxesHelper(50);
+            scene.add(axesHelper);
+
+            camera.position.set(100, 100, 200);
+            camera.lookAt(0, 0, 0);
+            controls.update();
+
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+
+            animate();
+
+            const mode = filterSettings.showOriginal ? "oriģinālo" : "filtrēto";
+            logMessage(`Vizualizācija: Rāda ${mode} mākoni (${visiblePointCloud.length} punkti)`);
+        }
+
+        function createFilterGeometry() {
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            
+            const filterPoints = createFilterPoints();
+            const xRot = filterSettings.rotationX * Math.PI / 180;
+            const yRot = filterSettings.rotationY * Math.PI / 180;
+            const zRot = filterSettings.rotationZ * Math.PI / 180;
+            
+            filterPoints.forEach(point => {
+                let x = point.x;
+                let y = point.y;
+                let z = point.z;
+                
+                // Apply rotations to match the filter
+                if (xRot !== 0) {
+                    const cosX = Math.cos(xRot);
+                    const sinX = Math.sin(xRot);
+                    const newY = y * cosX - z * sinX;
+                    const newZ = y * sinX + z * cosX;
+                    y = newY;
+                    z = newZ;
+                }
+                
+                if (yRot !== 0) {
+                    const cosY = Math.cos(yRot);
+                    const sinY = Math.sin(yRot);
+                    const newX = x * cosY + z * sinY;
+                    const newZ = -x * sinY + z * cosY;
+                    x = newX;
+                    z = newZ;
+                }
+                
+                if (zRot !== 0) {
+                    const cosZ = Math.cos(zRot);
+                    const sinZ = Math.sin(zRot);
+                    const newX = x * cosZ - y * sinZ;
+                    const newY = x * sinZ + y * cosZ;
+                    x = newX;
+                    y = newY;
+                }
+                
+                // Apply position offset
+                x += filterSettings.positionX;
+                z += filterSettings.positionZ;
+                
+                vertices.push(x, -y, z);
+            });
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            return geometry;
+        }
+
+        function updateVisualization() {
+            if (!scene) return;
+
+            // Update visible cloud
+            if (visibleCloudObject) {
+                scene.remove(visibleCloudObject);
+            }
+
+            if (visiblePointCloud.length > 0) {
+                const geometry3 = createGeometryFromPoints(visiblePointCloud);
+                visibleMaterial = new THREE.PointsMaterial({ 
+                    vertexColors: true, 
+                    size: parseFloat(pointSizeSlider.value),
+                    sizeAttenuation: false
+                });
+                visibleCloudObject = new THREE.Points(geometry3, visibleMaterial);
+                scene.add(visibleCloudObject);
+            }
+
+            // Update filter visualization
+            if (filterObject) {
+                scene.remove(filterObject);
+            }
+
+            if (topFilterData.maskData && filteredPointCloud.length > 0) {
+                const filterGeometry = createFilterGeometry();
+                filterMaterial = new THREE.PointsMaterial({ 
+                    color: 0x00ff00,
+                    size: parseFloat(pointSizeSlider.value) * 1.2,
+                    sizeAttenuation: false,
+                    opacity: 0.6,
+                    transparent: true
+                });
+                filterObject = new THREE.Points(filterGeometry, filterMaterial);
+                scene.add(filterObject);
+            }
+        }
+
+        function createGeometryFromPoints(points) {
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const colors = [];
+
+            points.forEach(point => {
+                const { x, y, z, color } = point;
+                vertices.push(x, -y, z);
+                colors.push(color.r / 255, color.g / 255, color.b / 255);
+            });
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            return geometry;
+        }
+
+        // Start video stream
+        startVideoStream();
+    </script>
+</body>
+</html>
