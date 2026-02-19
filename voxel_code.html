@@ -2,209 +2,242 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>AI 4-View Voxelizer (U2Net)</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 3D Skeneris (4-View)</title>
     <style>
-        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: white; overflow: hidden; display: flex; }
-        #sidebar { width: 350px; padding: 20px; background: #161616; border-right: 1px solid #333; z-index: 10; overflow-y: auto; height: 100vh; }
-        #viewport { flex-grow: 1; position: relative; }
-        video { width: 100%; border-radius: 8px; background: #000; transform: scaleX(-1); }
-        .view-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
-        .view-box { background: #222; padding: 5px; border-radius: 4px; text-align: center; font-size: 11px; }
-        canvas.preview { width: 100%; height: auto; display: block; margin-top: 5px; background: #000; }
-        button { width: 100%; padding: 12px; margin: 10px 0; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s; }
-        #btnCapture { background: #e91e63; color: white; }
-        #btnVoxelize { background: #2196f3; color: white; display: none; }
-        .status { color: #888; font-size: 12px; margin-top: 5px; }
-        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; visibility: hidden; }
+        body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 20px; }
+        canvas { border: 1px solid black; background: #000; }
+        #threeContainer { width: 100%; height: 500px; background: #eee; margin-top: 10px; }
+        #log { margin-top: 10px; background: #333; color: #0f0; padding: 10px; font-family: monospace; height: 40px; overflow: hidden; }
+        .controls { margin-bottom: 10px; }
+        .previews { display: flex; gap: 5px; margin-top: 10px; }
+        .preview-box { text-align: center; font-size: 10px; }
     </style>
 </head>
 <body>
+    <h1>3D Skeneris (4 Skati)</h1>
 
-<div id="loading-overlay">Processing AI Segmentation...</div>
-
-<div id="sidebar">
-    <h2>4-View Voxelizer</h2>
-    <video id="webcam" autoplay playsinline></video>
-    <div id="modelStatus" class="status">Loading AI Model...</div>
-    
-    <button id="btnCapture" disabled>Capture Front (0°)</button>
-    
-    <div class="view-grid">
-        <div class="view-box">Front<canvas id="c0" class="preview"></canvas></div>
-        <div class="view-box">Right<canvas id="c1" class="preview"></canvas></div>
-        <div class="view-box">Back<canvas id="c2" class="preview"></canvas></div>
-        <div class="view-box">Left<canvas id="c3" class="preview"></canvas></div>
+    <div class="controls">
+        <video id="video1" autoplay width="128" height="128" style="transform: scaleX(-1);"></video>
+        <canvas id="canvasOnnx" width="128" height="128"></canvas>
+        <br><br>
+        
+        <button id="btn0">1. Priekša (Front)</button>
+        <button id="btn1" disabled>2. Labais (Right)</button>
+        <button id="btn2" disabled>3. Aizmugure (Back)</button>
+        <button id="btn3" disabled>4. Kreisais (Left)</button>
+        
+        <button id="downloadButton" style="background: #28a745; color: white; display:none;">Ģenerēt & Lejupielādēt .PLY</button>
     </div>
 
-    <button id="btnVoxelize">Generate 3D Model</button>
-    <div class="status">Rotate object 90° between captures. Use a clean background.</div>
-</div>
+    <label for="thresholdSlider">Punktu lielums: </label>
+    <input type="range" id="thresholdSlider" min="1" max="15" value="5">
 
-<div id="viewport"></div>
+    <div class="previews">
+        <div class="preview-box">F (0°)<br><canvas id="p0" width="64" height="64"></canvas></div>
+        <div class="preview-box">R (90°)<br><canvas id="p1" width="64" height="64"></canvas></div>
+        <div class="preview-box">B (180°)<br><canvas id="p2" width="64" height="64"></canvas></div>
+        <div class="preview-box">L (270°)<br><canvas id="p3" width="64" height="64"></canvas></div>
+    </div>
 
-<script>
-    let session;
-    const views = ["Front", "Right", "Back", "Left"];
-    let currentStep = 0;
-    const masks = [null, null, null, null];
-    const resolution = 64; // Grid size: 64x64x64
+    <div id="log">Info: Gaida modeli...</div>
+    <div id="threeContainer"></div>
 
-    const video = document.getElementById('webcam');
-    const btnCapture = document.getElementById('btnCapture');
-    const btnVoxelize = document.getElementById('btnVoxelize');
-    const modelStatus = document.getElementById('modelStatus');
-    const loading = document.getElementById('loading-overlay');
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.130.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js"></script>
 
-    // 1. Setup Three.js
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth - 350, window.innerHeight);
-    document.getElementById('viewport').appendChild(renderer.domElement);
-    
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    camera.position.set(100, 100, 100);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const light = new THREE.DirectionalLight(0xffffff, 0.5);
-    light.position.set(10, 20, 10);
-    scene.add(light);
-
-    // 2. Load ONNX Model (u2netp)
-    async function initAI() {
-        try {
-            session = await ort.InferenceSession.create('./u2netp_128.onnx', { executionProviders: ['wasm'] });
-            modelStatus.innerText = "AI Model Ready";
-            btnCapture.disabled = false;
-            
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 320 } });
-            video.srcObject = stream;
-        } catch (e) {
-            modelStatus.innerText = "Error: " + e.message;
-            console.error(e);
-        }
-    }
-
-    // 3. Image Processing (Remove Background)
-    async function getMask(inputCanvas) {
-        const ctx = inputCanvas.getContext('2d');
-        const imgData = ctx.getImageData(0, 0, 320, 320);
+    <script>
+        const video = document.getElementById('video1');
+        const canvasOnnx = document.getElementById('canvasOnnx');
+        const ctxOnnx = canvasOnnx.getContext('2d');
+        const log = document.getElementById('log');
+        const thresholdSlider = document.getElementById('thresholdSlider');
         
-        // Prepare tensor (Normalize to 0-1)
-        const input = new Float32Array(3 * 320 * 320);
-        for (let i = 0; i < 320 * 320; i++) {
-            input[i] = imgData.data[i * 4] / 255;           // R
-            input[i + 320 * 320] = imgData.data[i * 4 + 1] / 255; // G
-            input[i + 2 * 320 * 320] = imgData.data[i * 4 + 2] / 255; // B
-        }
+        let session;
+        let masks = [null, null, null, null];
+        let colors = [null, null, null, null];
+        const res = 128; // AI Model Resolution
 
-        const tensor = new ort.Tensor('float32', input, [1, 3, 320, 320]);
-        const output = await session.run({ input: tensor });
-        const maskData = output[Object.keys(output)[0]].data;
-
-        // Downscale to resolution (e.g. 64x64) for space carving
-        const miniMask = new Uint8Array(resolution * resolution);
-        const scale = 320 / resolution;
-        
-        for (let y = 0; y < resolution; y++) {
-            for (let x = 0; x < resolution; x++) {
-                const ox = Math.floor(x * scale);
-                const oy = Math.floor(y * scale);
-                miniMask[y * resolution + x] = maskData[oy * 320 + ox] > 0.5 ? 1 : 0;
+        // 1. Load ONNX Model
+        window.onload = async function() {
+            try {
+                session = await ort.InferenceSession.create('./u2netp_128.onnx', {
+                    executionProviders: ['wasm']
+                });
+                logMessage("Modelis ielādēts. Uzņemiet 1. skatu.");
+                startVideoStream();
+            } catch (e) {
+                logMessage("Kļūda ielādējot modeli: " + e.message);
             }
+        };
+
+        function logMessage(msg) { log.textContent = "Info: " + msg; }
+
+        async function startVideoStream() {
+            const constraints = { video: { width: 128, height: 128 } };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
         }
-        return miniMask;
-    }
 
-    // 4. Capture Event
-    btnCapture.onclick = async () => {
-        loading.style.visibility = "visible";
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = 320; tempCanvas.height = 320;
-        const tctx = tempCanvas.getContext('2d');
-        
-        // Mirror and draw
-        tctx.save();
-        tctx.scale(-1, 1);
-        tctx.drawImage(video, -320, 0, 320, 320);
-        tctx.restore();
+        // 2. AI Background Removal (Exact Data Config)
+        async function runAI() {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 128; tempCanvas.height = 128;
+            const tctx = tempCanvas.getContext('2d');
+            
+            // Mirror webcam and draw
+            tctx.save(); tctx.scale(-1, 1); tctx.drawImage(video, -128, 0, 128, 128); tctx.restore();
+            
+            const imgData = tctx.getImageData(0, 0, 128, 128);
+            const input = new Float32Array(128 * 128 * 3);
+            
+            // Your exact normalization logic
+            for (let i = 0, j = 0; i < imgData.data.length; i += 4, j++) {
+                input[j] = (imgData.data[i] / 255 - 0.485) / 0.229;
+                input[j + 16384] = (imgData.data[i + 1] / 255 - 0.456) / 0.224;
+                input[j + 32768] = (imgData.data[i + 2] / 255 - 0.406) / 0.225;
+            }
 
-        // Run AI on this frame
-        const mask = await getMask(tempCanvas);
-        masks[currentStep] = mask;
+            const inputTensor = new ort.Tensor('float32', input, [1, 3, 128, 128]);
+            const results = await session.run({ "input.1": inputTensor });
+            const pred = Object.values(results)[0].data;
 
-        // Draw preview
-        const previewCanvas = document.getElementById(`c${currentStep}`);
-        previewCanvas.width = resolution; previewCanvas.height = resolution;
-        const pctx = previewCanvas.getContext('2d');
-        const pData = pctx.createImageData(resolution, resolution);
-        for(let i=0; i<mask.length; i++) {
-            const val = mask[i] * 255;
-            pData.data[i*4]=val; pData.data[i*4+1]=val; pData.data[i*4+2]=val; pData.data[i*4+3]=255;
+            // Binarize (Using your logic where 0 is object, 255 is background)
+            const maskArr = new Uint8Array(128 * 128);
+            const minVal = Math.min(...pred);
+            const maxVal = Math.max(...pred);
+            const threshold = (maxVal - minVal) * 0.5 + minVal;
+
+            for (let i = 0; i < pred.length; i++) {
+                maskArr[i] = pred[i] < threshold ? 0 : 255; 
+            }
+
+            return { mask: maskArr, color: imgData };
         }
-        pctx.putImageData(pData, 0, 0);
 
-        currentStep++;
-        if (currentStep < 4) {
-            btnCapture.innerText = `Capture ${views[currentStep]} (Next)`;
-        } else {
-            btnCapture.innerText = "All Views Captured";
-            btnCapture.disabled = true;
-            btnVoxelize.style.display = "block";
-        }
-        loading.style.visibility = "hidden";
-    };
+        // 3. Capture Buttons
+        [0, 1, 2, 3].forEach(i => {
+            document.getElementById(`btn${i}`).onclick = async () => {
+                logMessage(`Procesē ${i+1}. skatu...`);
+                const result = await runAI();
+                masks[i] = result.mask;
+                colors[i] = result.color;
 
-    // 5. Space Carving Logic
-    btnVoxelize.onclick = () => {
-        // Clear previous meshes
-        scene.children = scene.children.filter(c => !c.isInstancedMesh);
+                // Draw Preview
+                const pCan = document.getElementById(`p${i}`);
+                const pCtx = pCan.getContext('2d');
+                const pImg = pCtx.createImageData(128, 128);
+                for(let j=0; j<result.mask.length; j++) {
+                    const v = result.mask[j];
+                    pImg.data[j*4]=v; pImg.data[j*4+1]=v; pImg.data[j*4+2]=v; pImg.data[j*4+3]=255;
+                }
+                pCtx.putImageData(pImg, 0, 0);
 
-        const mesh = new THREE.InstancedMesh(
-            new THREE.BoxGeometry(1, 1, 1),
-            new THREE.MeshPhongMaterial({ color: 0x44aa88 }),
-            Math.pow(resolution, 3)
-        );
-        const dummy = new THREE.Object3D();
-        let count = 0;
+                // UI flow
+                document.getElementById(`btn${i}`).disabled = true;
+                if(i < 3) {
+                    document.getElementById(`btn${i+1}`).disabled = false;
+                    logMessage(`Pagrieziet objektu pa 90°.`);
+                } else {
+                    document.getElementById('downloadButton').style.display = 'inline-block';
+                    logMessage(`Visi skati gatavi!`);
+                }
+            };
+        });
 
-        for (let x = 0; x < resolution; x++) {
-            for (let y = 0; y < resolution; y++) {
-                for (let z = 0; z < resolution; z++) {
-                    
-                    // The 4-Way Intersection Check
-                    const idxFront = y * resolution + x;
-                    const idxRight = y * resolution + z;
-                    const idxBack  = y * resolution + (resolution - 1 - x);
-                    const idxLeft  = y * resolution + (resolution - 1 - z);
+        // 4. Space Carving Logic (4-View Intersection)
+        function generateCommonPoints() {
+            const commonPoints = [];
+            const step = 1; // Increase to 2 for faster processing/lower density
 
-                    if (masks[0][idxFront] && masks[1][idxRight] && masks[2][idxBack] && masks[3][idxLeft]) {
-                        dummy.position.set(x - resolution/2, (resolution - y) - resolution/2, z - resolution/2);
-                        dummy.updateMatrix();
-                        mesh.setMatrixAt(count++, dummy.matrix);
+            for (let y = 0; y < 128; y += step) {
+                for (let x = 0; x < 128; x += step) {
+                    for (let z = 0; z < 128; z += step) {
+                        
+                        // Check masks (0 = object in your logic)
+                        const isFront = masks[0][y * 128 + x] === 0;
+                        const isRight = masks[1][y * 128 + z] === 0;
+                        const isBack  = masks[2][y * 128 + (127 - x)] === 0;
+                        const isLeft  = masks[3][y * 128 + (127 - z)] === 0;
+
+                        if (isFront && isRight && isBack && isLeft) {
+                            // Color averaging
+                            const idxF = (y * 128 + x) * 4;
+                            const idxR = (y * 128 + z) * 4;
+                            const r = (colors[0].data[idxF] + colors[1].data[idxR]) / 2;
+                            const g = (colors[0].data[idxF+1] + colors[1].data[idxR+1]) / 2;
+                            const b = (colors[0].data[idxF+2] + colors[1].data[idxR+2]) / 2;
+
+                            commonPoints.push({
+                                x: x - 64, 
+                                y: 64 - y, 
+                                z: z - 64, 
+                                r, g, b
+                            });
+                        }
                     }
                 }
             }
+            return commonPoints;
         }
-        mesh.count = count;
-        scene.add(mesh);
-    };
 
-    function animate() {
-        requestAnimationFrame(animate);
-        renderer.render(scene, camera);
-    }
+        // 5. Visualizer & Download
+        document.getElementById('downloadButton').onclick = () => {
+            const pts = generateCommonPoints();
+            visualize(pts);
+            downloadPLY(pts);
+        };
 
-    window.onresize = () => {
-        camera.aspect = (window.innerWidth - 350) / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth - 350, window.innerHeight);
-    };
+        function visualize(pts) {
+            const container = document.getElementById('threeContainer');
+            container.innerHTML = '';
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
 
-    initAI();
-    animate();
-</script>
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const colorsAttr = [];
+
+            pts.forEach(p => {
+                positions.push(p.x, p.y, p.z);
+                colorsAttr.push(p.r / 255, p.g / 255, p.b / 255);
+            });
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorsAttr, 3));
+
+            const material = new THREE.PointsMaterial({ 
+                vertexColors: true, 
+                size: thresholdSlider.value, 
+                sizeAttenuation: false 
+            });
+            const cloud = new THREE.Points(geometry, material);
+            scene.add(cloud);
+            camera.position.z = 150;
+
+            function animate() {
+                requestAnimationFrame(animate);
+                cloud.rotation.y += 0.01;
+                renderer.render(scene, camera);
+            }
+            animate();
+            
+            thresholdSlider.oninput = () => { material.size = thresholdSlider.value; };
+        }
+
+        function downloadPLY(pts) {
+            let header = `ply\nformat ascii 1.0\nelement vertex ${pts.length}\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n`;
+            let body = pts.map(p => `${p.x} ${p.y} ${p.z} ${Math.floor(p.r)} ${Math.floor(p.g)} ${Math.floor(p.b)}`).join('\n');
+            const blob = new Blob([header + body], { type: 'text/plain' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'skenejums_4skati.ply';
+            link.click();
+        }
+    </script>
 </body>
 </html>
