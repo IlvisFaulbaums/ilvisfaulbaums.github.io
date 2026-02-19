@@ -3,35 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 3D Skeneris (4-View)</title>
+    <title>Invertēts 3D Skeneris (4-View)</title>
     <style>
-        body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 20px; }
-        canvas { border: 1px solid black; background: #000; }
-        #threeContainer { width: 100%; height: 500px; background: #eee; margin-top: 10px; }
-        #log { margin-top: 10px; background: #333; color: #0f0; padding: 10px; font-family: monospace; height: 40px; overflow: hidden; }
-        .controls { margin-bottom: 10px; }
-        .previews { display: flex; gap: 5px; margin-top: 10px; }
-        .preview-box { text-align: center; font-size: 10px; }
+        body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 20px; }
+        canvas { border: 1px solid #444; background: #000; }
+        #threeContainer { width: 100%; height: 500px; background: #000; margin-top: 10px; border: 1px solid #333; }
+        #log { margin-top: 10px; background: #222; color: #0f0; padding: 10px; font-family: monospace; border-left: 5px solid #0f0; }
+        .controls { margin-bottom: 15px; background: #222; padding: 15px; border-radius: 8px; }
+        .previews { display: flex; gap: 8px; margin-top: 10px; }
+        .preview-box { text-align: center; font-size: 11px; color: #888; }
+        button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 4px; font-weight: bold; }
+        .btn-capture { background: #444; color: white; margin-right: 5px; }
+        .btn-capture:enabled { background: #e91e63; }
+        #downloadButton { background: #008cff; color: white; display: none; }
     </style>
 </head>
 <body>
-    <h1>3D Skeneris (4 Skati)</h1>
+    <h1>Invertēts 3D Skeneris (4 Skati)</h1>
 
     <div class="controls">
-        <video id="video1" autoplay width="128" height="128" style="transform: scaleX(-1);"></video>
+        <video id="video1" autoplay width="128" height="128" style="transform: scaleX(-1); border: 2px solid #555;"></video>
         <canvas id="canvasOnnx" width="128" height="128"></canvas>
-        <br><br>
+        <p><i>Instrukcija: Uzņemiet 4 kadrus, pagriežot objektu par 90° pēc katra kadra.</i></p>
         
-        <button id="btn0">1. Priekša (Front)</button>
-        <button id="btn1" disabled>2. Labais (Right)</button>
-        <button id="btn2" disabled>3. Aizmugure (Back)</button>
-        <button id="btn3" disabled>4. Kreisais (Left)</button>
+        <button id="btn0" class="btn-capture">1. Priekša (0°)</button>
+        <button id="btn1" class="btn-capture" disabled>2. Sāns (90°)</button>
+        <button id="btn2" class="btn-capture" disabled>3. Aizmugure (180°)</button>
+        <button id="btn3" class="btn-capture" disabled>4. Otrs sāns (270°)</button>
         
-        <button id="downloadButton" style="background: #28a745; color: white; display:none;">Ģenerēt & Lejupielādēt .PLY</button>
+        <button id="downloadButton">Ģenerēt INVERTĒTU mākoni</button>
     </div>
 
-    <label for="thresholdSlider">Punktu lielums: </label>
-    <input type="range" id="thresholdSlider" min="1" max="15" value="5">
+    <label>Punktu blīvums/izmērs: </label>
+    <input type="range" id="thresholdSlider" min="1" max="15" value="4">
 
     <div class="previews">
         <div class="preview-box">F (0°)<br><canvas id="p0" width="64" height="64"></canvas></div>
@@ -43,137 +47,129 @@
     <div id="log">Info: Gaida modeli...</div>
     <div id="threeContainer"></div>
 
-    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.130.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/ort.min.js"></script>
 
     <script>
         const video = document.getElementById('video1');
-        const canvasOnnx = document.getElementById('canvasOnnx');
-        const ctxOnnx = canvasOnnx.getContext('2d');
         const log = document.getElementById('log');
         const thresholdSlider = document.getElementById('thresholdSlider');
         
         let session;
         let masks = [null, null, null, null];
         let colors = [null, null, null, null];
-        const res = 128; // AI Model Resolution
 
-        // 1. Load ONNX Model
+        // 1. Ielādējam ONNX modeli (u2netp_128.onnx)
         window.onload = async function() {
             try {
                 session = await ort.InferenceSession.create('./u2netp_128.onnx', {
                     executionProviders: ['wasm']
                 });
-                logMessage("Modelis ielādēts. Uzņemiet 1. skatu.");
+                logMessage("Modelis ielādēts. Uzņemiet pirmo skatu.");
                 startVideoStream();
             } catch (e) {
-                logMessage("Kļūda ielādējot modeli: " + e.message);
+                logMessage("Kļūda: " + e.message);
             }
         };
 
         function logMessage(msg) { log.textContent = "Info: " + msg; }
 
         async function startVideoStream() {
-            const constraints = { video: { width: 128, height: 128 } };
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 128, height: 128 } });
             video.srcObject = stream;
         }
 
-        // 2. AI Background Removal (Exact Data Config)
+        // 2. AI Apstrāde (Invertēta krāsu loģika maskai)
         async function runAI() {
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = 128; tempCanvas.height = 128;
             const tctx = tempCanvas.getContext('2d');
-            
-            // Mirror webcam and draw
             tctx.save(); tctx.scale(-1, 1); tctx.drawImage(video, -128, 0, 128, 128); tctx.restore();
             
             const imgData = tctx.getImageData(0, 0, 128, 128);
-            const input = new Float32Array(128 * 128 * 3);
+            const floatArr = new Float32Array(128 * 128 * 3);
             
-            // Your exact normalization logic
             for (let i = 0, j = 0; i < imgData.data.length; i += 4, j++) {
-                input[j] = (imgData.data[i] / 255 - 0.485) / 0.229;
-                input[j + 16384] = (imgData.data[i + 1] / 255 - 0.456) / 0.224;
-                input[j + 32768] = (imgData.data[i + 2] / 255 - 0.406) / 0.225;
+                floatArr[j] = (imgData.data[i] / 255 - 0.485) / 0.229;
+                floatArr[j + 16384] = (imgData.data[i + 1] / 255 - 0.456) / 0.224;
+                floatArr[j + 32768] = (imgData.data[i + 2] / 255 - 0.406) / 0.225;
             }
 
-            const inputTensor = new ort.Tensor('float32', input, [1, 3, 128, 128]);
+            const inputTensor = new ort.Tensor('float32', floatArr, [1, 3, 128, 128]);
             const results = await session.run({ "input.1": inputTensor });
             const pred = Object.values(results)[0].data;
 
-            // Binarize (Using your logic where 0 is object, 255 is background)
             const maskArr = new Uint8Array(128 * 128);
             const minVal = Math.min(...pred);
             const maxVal = Math.max(...pred);
             const threshold = (maxVal - minVal) * 0.5 + minVal;
 
             for (let i = 0; i < pred.length; i++) {
-                maskArr[i] = pred[i] < threshold ? 0 : 255; 
+                // Saglabājam bināru masku: 255 (Balts = Fons), 0 (Melns = Objekts)
+                maskArr[i] = pred[i] < threshold ? 255 : 0; 
             }
+
+            // Parādām masku uz galvenā ONNX kanvasa
+            const finalCtx = document.getElementById("canvasOnnx").getContext("2d");
+            const finalImgData = finalCtx.createImageData(128, 128);
+            for(let i=0; i<maskArr.length; i++) {
+                const v = maskArr[i];
+                finalImgData.data[i*4]=v; finalImgData.data[i*4+1]=v; finalImgData.data[i*4+2]=v; finalImgData.data[i*4+3]=255;
+            }
+            finalCtx.putImageData(finalImgData, 0, 0);
 
             return { mask: maskArr, color: imgData };
         }
 
-        // 3. Capture Buttons
+        // 3. Uzņemšanas soļi
         [0, 1, 2, 3].forEach(i => {
             document.getElementById(`btn${i}`).onclick = async () => {
-                logMessage(`Procesē ${i+1}. skatu...`);
+                logMessage(`Apstrādā ${i+1}. skatu...`);
                 const result = await runAI();
                 masks[i] = result.mask;
                 colors[i] = result.color;
 
-                // Draw Preview
-                const pCan = document.getElementById(`p${i}`);
-                const pCtx = pCan.getContext('2d');
-                const pImg = pCtx.createImageData(128, 128);
-                for(let j=0; j<result.mask.length; j++) {
-                    const v = result.mask[j];
-                    pImg.data[j*4]=v; pImg.data[j*4+1]=v; pImg.data[j*4+2]=v; pImg.data[j*4+3]=255;
-                }
-                pCtx.putImageData(pImg, 0, 0);
+                const pCtx = document.getElementById(`p${i}`).getContext('2d');
+                pCtx.drawImage(document.getElementById("canvasOnnx"), 0, 0, 64, 64);
 
-                // UI flow
                 document.getElementById(`btn${i}`).disabled = true;
                 if(i < 3) {
                     document.getElementById(`btn${i+1}`).disabled = false;
-                    logMessage(`Pagrieziet objektu pa 90°.`);
+                    logMessage(`Pagrieziet objektu par 90 grādiem!`);
                 } else {
                     document.getElementById('downloadButton').style.display = 'inline-block';
-                    logMessage(`Visi skati gatavi!`);
+                    logMessage(`Visi skati gatavi. Spiediet ģenerēt.`);
                 }
             };
         });
 
-        // 4. Space Carving Logic (4-View Intersection)
-        function generateCommonPoints() {
+        // 4. INVERTĒTĀ 4-skatu loģika
+        function generateInvertedCloud() {
             const commonPoints = [];
-            const step = 1; // Increase to 2 for faster processing/lower density
+            const skip = 1; // Var palielināt uz 2, lai strādātu ātrāk
 
-            for (let y = 0; y < 128; y += step) {
-                for (let x = 0; x < 128; x += step) {
-                    for (let z = 0; z < 128; z += step) {
+            for (let y = 0; y < 128; y += skip) {
+                for (let x = 0; x < 128; x += skip) {
+                    for (let z = 0; z < 128; z += skip) {
                         
-                        // Check masks (0 = object in your logic)
-                        const isFront = masks[0][y * 128 + x] === 0;
-                        const isRight = masks[1][y * 128 + z] === 0;
-                        const isBack  = masks[2][y * 128 + (127 - x)] === 0;
-                        const isLeft  = masks[3][y * 128 + (127 - z)] === 0;
+                        // !!! INVERTĒTĀ PĀRBAUDE !!!
+                        // Mēs pārbaudām, vai maskā ir 255 (BALTS). 
+                        // Tas nozīmē, ka punkts tiks ģenerēts visur, IZŅEMOT objektu.
+                        const isFront = masks[0][y * 128 + x] === 255;
+                        const isRight = masks[1][y * 128 + z] === 255;
+                        const isBack  = masks[2][y * 128 + (127 - x)] === 255;
+                        const isLeft  = masks[3][y * 128 + (127 - z)] === 255;
 
+                        // Tikai ja visos četros skatos šī vieta ir "tukša" (fons), mēs tur liekam punktu
                         if (isFront && isRight && isBack && isLeft) {
-                            // Color averaging
-                            const idxF = (y * 128 + x) * 4;
-                            const idxR = (y * 128 + z) * 4;
-                            const r = (colors[0].data[idxF] + colors[1].data[idxR]) / 2;
-                            const g = (colors[0].data[idxF+1] + colors[1].data[idxR+1]) / 2;
-                            const b = (colors[0].data[idxF+2] + colors[1].data[idxR+2]) / 2;
-
+                            const idx = (y * 128 + x) * 4;
                             commonPoints.push({
                                 x: x - 64, 
                                 y: 64 - y, 
                                 z: z - 64, 
-                                r, g, b
+                                r: colors[0].data[idx], 
+                                g: colors[0].data[idx+1], 
+                                b: colors[0].data[idx+2]
                             });
                         }
                     }
@@ -182,14 +178,12 @@
             return commonPoints;
         }
 
-        // 5. Visualizer & Download
+        // 5. Vizualizācija un PLY fails
         document.getElementById('downloadButton').onclick = () => {
-            const pts = generateCommonPoints();
-            visualize(pts);
-            downloadPLY(pts);
-        };
-
-        function visualize(pts) {
+            const pts = generateInvertedCloud();
+            logMessage(`Ģenerēti ${pts.length} invertēti punkti.`);
+            
+            // Vizualizēt
             const container = document.getElementById('threeContainer');
             container.innerHTML = '';
             const scene = new THREE.Scene();
@@ -199,45 +193,30 @@
             container.appendChild(renderer.domElement);
 
             const geometry = new THREE.BufferGeometry();
-            const positions = [];
-            const colorsAttr = [];
-
+            const pos = []; const col = [];
             pts.forEach(p => {
-                positions.push(p.x, p.y, p.z);
-                colorsAttr.push(p.r / 255, p.g / 255, p.b / 255);
+                pos.push(p.x * 5, p.y * 5, p.z * 5);
+                col.push(p.r / 255, p.g / 255, p.b / 255);
             });
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
 
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorsAttr, 3));
-
-            const material = new THREE.PointsMaterial({ 
-                vertexColors: true, 
-                size: thresholdSlider.value, 
-                sizeAttenuation: false 
-            });
-            const cloud = new THREE.Points(geometry, material);
+            const mat = new THREE.PointsMaterial({ vertexColors: true, size: thresholdSlider.value, sizeAttenuation: false });
+            const cloud = new THREE.Points(geometry, mat);
             scene.add(cloud);
-            camera.position.z = 150;
+            camera.position.z = 500;
 
-            function animate() {
-                requestAnimationFrame(animate);
-                cloud.rotation.y += 0.01;
-                renderer.render(scene, camera);
-            }
+            function animate() { requestAnimationFrame(animate); cloud.rotation.y += 0.005; renderer.render(scene, camera); }
             animate();
-            
-            thresholdSlider.oninput = () => { material.size = thresholdSlider.value; };
-        }
 
-        function downloadPLY(pts) {
-            let header = `ply\nformat ascii 1.0\nelement vertex ${pts.length}\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n`;
-            let body = pts.map(p => `${p.x} ${p.y} ${p.z} ${Math.floor(p.r)} ${Math.floor(p.g)} ${Math.floor(p.b)}`).join('\n');
-            const blob = new Blob([header + body], { type: 'text/plain' });
+            // Lejupielādēt
+            let ply = `ply\nformat ascii 1.0\nelement vertex ${pts.length}\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n`;
+            ply += pts.map(p => `${p.x} ${p.y} ${p.z} ${p.r} ${p.g} ${p.b}`).join('\n');
             const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = 'skenejums_4skati.ply';
+            link.href = URL.createObjectURL(new Blob([ply], {type: 'text/plain'}));
+            link.download = 'invertets_modelis.ply';
             link.click();
-        }
+        };
     </script>
 </body>
 </html>
