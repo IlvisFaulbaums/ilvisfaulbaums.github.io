@@ -75,7 +75,7 @@
     // 2. Load ONNX Model (u2netp)
     async function initAI() {
         try {
-            session = await ort.InferenceSession.create('./u2netp.onnx', { executionProviders: ['wasm'] });
+            session = await ort.InferenceSession.create('./u2netp_128.onnx', { executionProviders: ['wasm'] });
             modelStatus.innerText = "AI Model Ready";
             btnCapture.disabled = false;
             
